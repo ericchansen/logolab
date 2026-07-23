@@ -161,7 +161,7 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 .header-file-button,
-.export-menu summary,
+.export-trigger,
 .file-button {
   display: inline-flex;
   min-height: 32px;
@@ -188,39 +188,32 @@ input[type="color"]::-webkit-color-swatch {
   white-space: nowrap;
 }
 
-.export-menu {
-  position: relative;
-}
-
-.export-menu summary {
+.export-trigger {
   border-color: var(--accent);
   background: var(--accent);
   color: white;
-  list-style: none;
 }
 
-.export-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.export-menu summary:hover,
-.export-menu[open] summary {
+.export-trigger:hover,
+body:has(.export-popover:popover-open) .export-trigger {
   border-color: var(--accent-dark);
   background: var(--accent-dark);
 }
 
 .export-popover {
-  position: absolute;
-  top: calc(100% + 7px);
-  right: 0;
-  z-index: 50;
-  display: grid;
+  position: fixed;
+  inset: var(--export-top, 48px) var(--export-right, 8px) auto auto;
   width: 226px;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-strong);
   box-shadow: 0 14px 32px oklch(0.2 0.02 255 / 0.15);
   padding: 5px;
+}
+
+.export-popover:popover-open {
+  display: grid;
 }
 
 .export-popover > button,
@@ -488,15 +481,20 @@ input[type="color"]::-webkit-color-swatch {
   border-radius: 4px;
 }
 
-.glyph-tabs button.is-active {
+.glyph-tabs button.is-selected {
   color: var(--accent-dark);
 }
 
-.glyph-tabs button.is-active::before {
-  opacity: 1;
+.glyph-tabs button.is-selected::before {
+  opacity: 0.55;
 }
 
-.glyph-tabs button.is-active strong {
+.glyph-tabs button.is-primary::before {
+  opacity: 1;
+  transform: scale(1.25);
+}
+
+.glyph-tabs button.is-primary strong {
   font-weight: 600;
 }
 
@@ -754,12 +752,6 @@ input[type="color"]::-webkit-color-swatch {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
-}
-
-.following-toggle[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-dark);
 }
 
 .pair-list {

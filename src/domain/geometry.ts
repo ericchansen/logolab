@@ -2,7 +2,6 @@ import type {
   DesignDocument,
   FontRuntime,
   GlyphBounds,
-  MoveMode,
   Point,
   Rect,
 } from './types'
@@ -78,12 +77,15 @@ export function getPaintedBounds(
 
 export function normalizeDesignCoordinates(
   design: DesignDocument,
-  font: FontRuntime,
+  anchorIndex = 0,
 ): DesignDocument {
-  const bounds = getPaintedBounds(design, font)
+  const anchor = design.glyphs[anchorIndex] ?? design.glyphs[0]
+  if (!anchor) {
+    return design
+  }
   if (
-    Math.abs(bounds.x) <= NORMALIZATION_TOLERANCE &&
-    Math.abs(bounds.y) <= NORMALIZATION_TOLERANCE
+    Math.abs(anchor.x) <= NORMALIZATION_TOLERANCE &&
+    Math.abs(anchor.y) <= NORMALIZATION_TOLERANCE
   ) {
     return design
   }
@@ -92,8 +94,8 @@ export function normalizeDesignCoordinates(
     ...design,
     glyphs: design.glyphs.map((glyph) => ({
       ...glyph,
-      x: glyph.x - bounds.x,
-      y: glyph.y - bounds.y,
+      x: glyph.x - anchor.x,
+      y: glyph.y - anchor.y,
     })),
     overlapsStale: true,
     updatedAt: new Date().toISOString(),
@@ -125,15 +127,14 @@ export function expandRect(rect: Rect, padding: number): Rect {
 
 export function moveGlyphs(
   design: DesignDocument,
-  index: number,
+  indices: readonly number[],
   delta: Point,
-  mode: MoveMode,
 ): DesignDocument {
+  const selected = new Set(indices)
   return {
     ...design,
     glyphs: design.glyphs.map((glyph, glyphIndex) => {
-      const shouldMove = mode === 'following' ? glyphIndex >= index : glyphIndex === index
-      return shouldMove
+      return selected.has(glyphIndex)
         ? { ...glyph, x: glyph.x + delta.x, y: glyph.y + delta.y }
         : glyph
     }),

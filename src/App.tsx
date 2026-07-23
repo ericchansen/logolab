@@ -5,8 +5,9 @@ import {
   useState,
   type ChangeEvent,
   type CSSProperties,
+  type KeyboardEvent,
 } from 'react'
-import { LogoStage } from './components/LogoStage'
+import { LogoStage, type GlyphSelectionAction } from './components/LogoStage'
 import { RUBIK_LOGO_LAB_PRESET } from './domain/defaultPreset'
 import {
   createDesign,
@@ -45,7 +46,6 @@ import type {
   DesignDocument,
   FontRuntime,
   FontSpec,
-  MoveMode,
   Point,
   Rect,
   StoredFont,
@@ -54,6 +54,28 @@ import type {
 const INITIAL_TEXT = 'Logo Lab'
 const PNG_PRESETS = [512, 1024, 2048, 4096]
 let proofRenderSequence = 0
+
+interface GlyphSelection {
+  indices: number[]
+  primary: number | null
+}
+
+function clampGlyphSelection(selection: GlyphSelection, glyphCount: number): GlyphSelection {
+  if (selection.primary === null || glyphCount === 0) {
+    return { indices: [], primary: null }
+  }
+  const lastIndex = glyphCount - 1
+  const primary = Math.min(selection.primary, lastIndex)
+  const indices = [...new Set(
+    selection.indices
+      .filter((index) => index >= 0)
+      .map((index) => Math.min(index, lastIndex)),
+  )]
+  if (!indices.includes(primary)) {
+    indices.push(primary)
+  }
+  return { indices, primary }
+}
 
 function withUpdatedTime(design: DesignDocument): DesignDocument {
   return { ...design, updatedAt: new Date().toISOString() }
@@ -82,8 +104,8 @@ function App() {
   const [textDraft, setTextDraft] = useState(INITIAL_TEXT)
   const [smallProofDraft, setSmallProofDraft] = useState('32')
   const [isSmallProofEditing, setIsSmallProofEditing] = useState(false)
-  const [selectedGlyph, setSelectedGlyph] = useState<number | null>(0)
-  const [moveMode, setMoveMode] = useState<MoveMode>('single')
+  const [selection, setSelection] = useState<GlyphSelection>({ indices: [0], primary: 0 })
+  const [layerFocusIndex, setLayerFocusIndex] = useState(0)
   const [viewBox, setViewBox] = useState<Rect>({
     x: 0,
     y: -1000,
@@ -105,6 +127,8 @@ function App() {
   const deletedFontIds = useRef(new Set<string>())
   const tombstonedFonts = useRef(new Map<string, StoredFont>())
   const smallProofEditStart = useRef(32)
+  const exportTriggerRef = useRef<HTMLButtonElement>(null)
+  const exportPopoverRef = useRef<HTMLDivElement>(null)
 
   const fontSpecs = useMemo<FontSpec[]>(
     () => [
@@ -248,9 +272,8 @@ function App() {
       setDesign(nextDesign)
       replaceTextDraft(text)
       pendingFontSpec.current = null
-      setSelectedGlyph((current) =>
-        current === null ? null : Math.min(current, nextDesign.glyphs.length - 1),
-      )
+      setSelection((current) => clampGlyphSelection(current, nextDesign.glyphs.length))
+      setLayerFocusIndex((current) => Math.min(current, nextDesign.glyphs.length - 1))
       setViewBox(expandRect(getPaintedBounds(nextDesign, runtime), 100))
       setStatus('')
       return nextDesign
@@ -419,8 +442,70 @@ function App() {
     })
   }
 
-  function handleMove(index: number, delta: Point, mode: MoveMode) {
-    updateDesign((current) => moveGlyphs(current, index, delta, mode))
+  function updateGlyphSelection(index: number, action: GlyphSelectionAction) {
+    setLayerFocusIndex(index)
+    setSelection((current) => {
+      if (action === 'replace' || !current.indices.includes(index)) {
+        if (action === 'toggle' && !current.indices.includes(index)) {
+          return { indices: [...current.indices, index], primary: index }
+        }
+        return { indices: [index], primary: index }
+      }
+      if (action === 'primary') {
+        return { ...current, primary: index }
+      }
+      const indices = current.indices.filter((candidate) => candidate !== index)
+      return {
+        indices,
+        primary: current.primary === index ? indices.at(-1) ?? null : current.primary,
+      }
+    })
+  }
+
+  function handleLayerKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const lastIndex = Array.from(design?.text ?? '').length - 1
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      nextIndex = Math.min(index + 1, lastIndex)
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      nextIndex = Math.max(index - 1, 0)
+    } else if (event.key === 'Home') {
+      nextIndex = 0
+    } else if (event.key === 'End') {
+      nextIndex = lastIndex
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      updateGlyphSelection(index, event.shiftKey ? 'toggle' : 'replace')
+      return
+    }
+    if (nextIndex !== null) {
+      event.preventDefault()
+      setLayerFocusIndex(nextIndex)
+      event.currentTarget.parentElement
+        ?.querySelector<HTMLButtonElement>(`[data-glyph-index="${nextIndex}"]`)
+        ?.focus()
+    }
+  }
+
+  function handleMove(indices: readonly number[], delta: Point) {
+    updateDesign((current) => moveGlyphs(current, indices, delta))
+  }
+
+  function updatePrimaryCoordinate(axis: 'x' | 'y', value: number) {
+    const primary = selection.primary
+    if (primary === null) {
+      return
+    }
+    updateDesign((current) => {
+      const glyph = current.glyphs[primary]
+      if (!glyph) {
+        return current
+      }
+      const delta = axis === 'x'
+        ? { x: value - glyph.x, y: 0 }
+        : { x: 0, y: value - glyph.y }
+      return moveGlyphs(current, selection.indices, delta)
+    })
   }
 
   function recalculate() {
@@ -441,9 +526,9 @@ function App() {
     setError('')
     setGeometryFeedback('')
     try {
-      const normalized = normalizeDesignCoordinates(design, font)
+      const normalized = normalizeDesignCoordinates(design, selection.primary ?? 0)
       if (normalized === design) {
-        setGeometryFeedback('Coordinates are already normalized.')
+        setGeometryFeedback('Coordinates are already normalized to 0,0.')
         return
       }
       const refreshed = recalculateOverlaps(normalized, font)
@@ -451,7 +536,7 @@ function App() {
       setDesign(refreshed)
       setViewBox(expandRect(getPaintedBounds(refreshed, font), 100))
       if (persistDesign(refreshed)) {
-        setGeometryFeedback('Coordinates normalized.')
+        setGeometryFeedback('Coordinates normalized to 0,0.')
       }
     } catch (caught) {
       setGeometryFeedback('')
@@ -538,9 +623,8 @@ function App() {
         setFont(accurateFont)
         setDesign(accurateDesign)
         replaceTextDraft(draft)
-        setSelectedGlyph((current) =>
-          current === null ? null : Math.min(current, accurateDesign.glyphs.length - 1),
-        )
+        setSelection((current) => clampGlyphSelection(current, accurateDesign.glyphs.length))
+        setLayerFocusIndex((current) => Math.min(current, accurateDesign.glyphs.length - 1))
         setViewBox(expandRect(getDesignBounds(accurateDesign, accurateFont), 100))
         persistDesign(accurateDesign)
       }
@@ -588,6 +672,23 @@ function App() {
     }
   }
 
+  function positionExportPopover() {
+    const trigger = exportTriggerRef.current
+    const popover = exportPopoverRef.current
+    if (!trigger || !popover) {
+      return
+    }
+    const bounds = trigger.getBoundingClientRect()
+    popover.style.setProperty('--export-top', `${bounds.bottom + 7}px`)
+    popover.style.setProperty('--export-right', `${Math.max(8, window.innerWidth - bounds.right)}px`)
+  }
+
+  function runExportFromPopover(kind: 'svg' | 'png' | 'json') {
+    exportPopoverRef.current?.hidePopover()
+    exportTriggerRef.current?.focus()
+    void runExport(kind)
+  }
+
   async function uploadFont(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -632,6 +733,8 @@ function App() {
       setFont(runtime)
       setDesign(nextDesign)
       replaceTextDraft(targetText)
+      setSelection((current) => clampGlyphSelection(current, nextDesign.glyphs.length))
+      setLayerFocusIndex((current) => Math.min(current, nextDesign.glyphs.length - 1))
       setViewBox(expandRect(getDesignBounds(nextDesign, runtime), 100))
       setStatus('')
     } catch (caught) {
@@ -760,6 +863,8 @@ function App() {
       setFont(runtime)
       setDesign(imported)
       replaceTextDraft(imported.text)
+      setSelection((current) => clampGlyphSelection(current, imported.glyphs.length))
+      setLayerFocusIndex((current) => Math.min(current, imported.glyphs.length - 1))
       setViewBox(expandRect(getPaintedBounds(imported, runtime), 100))
       persistDesign(imported)
     } catch (caught) {
@@ -773,9 +878,10 @@ function App() {
     return <main className="loading-shell" aria-live="polite">{error || status}</main>
   }
 
-  const selected = selectedGlyph === null ? undefined : design.glyphs[selectedGlyph]
+  const selectedGlyphs = new Set(selection.indices)
+  const selected = selection.primary === null ? undefined : design.glyphs[selection.primary]
   const characters = Array.from(design.text)
-  const selectedCharacter = selectedGlyph === null ? '' : characters[selectedGlyph] ?? ''
+  const selectedCharacter = selection.primary === null ? '' : characters[selection.primary] ?? ''
   const tightBounds = getDesignBounds(design, font)
   const proofRenderId = ++proofRenderSequence
   const lightMarkup = proofMarkup(design, font, `light-${proofRenderId}`)
@@ -866,13 +972,33 @@ function App() {
             />
           </label>
 
-          <div className="glyph-tabs" role="list" aria-label="Glyph layers">
+          <div
+            className="glyph-tabs"
+            role="listbox"
+            aria-label="Glyph layers"
+            aria-multiselectable="true"
+          >
             {characters.map((character, index) => (
               <button
                 key={`${character}-${index}`}
-                className={selectedGlyph === index ? 'is-active' : ''}
-                aria-pressed={selectedGlyph === index}
-                onClick={() => setSelectedGlyph(index)}
+                className={[
+                  selectedGlyphs.has(index) ? 'is-selected' : '',
+                  selection.primary === index ? 'is-primary' : '',
+                ].filter(Boolean).join(' ')}
+                role="option"
+                aria-label={[
+                  String(index + 1).padStart(2, '0'),
+                  glyphLabel(character),
+                  selection.primary === index ? 'primary' : '',
+                ].filter(Boolean).join(' ')}
+                aria-selected={selectedGlyphs.has(index)}
+                data-glyph-index={index}
+                tabIndex={layerFocusIndex === index ? 0 : -1}
+                onFocus={() => setLayerFocusIndex(index)}
+                onKeyDown={(event) => handleLayerKeyDown(event, index)}
+                onClick={(event) =>
+                  updateGlyphSelection(index, event.shiftKey ? 'toggle' : 'replace')
+                }
               >
                 <span>{String(index + 1).padStart(2, '0')}</span>
                 <strong>{glyphLabel(character)}</strong>
@@ -901,10 +1027,31 @@ function App() {
                   onChange={(event) => void importDesign(event)}
                 />
               </label>
-              <details className="export-menu">
-                <summary>Export</summary>
-                <div className="export-popover">
-                  <button onClick={() => void runExport('svg')}>SVG</button>
+              <button
+                ref={exportTriggerRef}
+                className="export-trigger"
+                popoverTarget="export-popover"
+                aria-haspopup="dialog"
+                onClick={positionExportPopover}
+              >
+                Export
+              </button>
+              <div
+                ref={exportPopoverRef}
+                id="export-popover"
+                className="export-popover"
+                popover="auto"
+                role="dialog"
+                aria-label="Export options"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    event.currentTarget.hidePopover()
+                    exportTriggerRef.current?.focus()
+                  }
+                }}
+              >
+                  <button onClick={() => runExportFromPopover('svg')}>SVG</button>
                   <div className="png-export-row">
                     <label>
                       PNG
@@ -946,11 +1093,10 @@ function App() {
                         }}
                       />
                     )}
-                    <button onClick={() => void runExport('png')}>Download PNG</button>
+                    <button onClick={() => runExportFromPopover('png')}>Download PNG</button>
                   </div>
-                  <button onClick={() => void runExport('json')}>Design JSON</button>
-                </div>
-              </details>
+                  <button onClick={() => runExportFromPopover('json')}>Design JSON</button>
+              </div>
             </div>
           </div>
           <div className="stage-wrap">
@@ -959,10 +1105,10 @@ function App() {
               font={font}
               viewBox={viewBox}
               background={design.lightBackground}
-              selectedGlyph={selectedGlyph}
-              moveMode={moveMode}
-              onSelect={setSelectedGlyph}
-              onClearSelection={() => setSelectedGlyph(null)}
+              selectedGlyphs={selection.indices}
+              primaryGlyph={selection.primary}
+              onSelect={updateGlyphSelection}
+              onClearSelection={() => setSelection({ indices: [], primary: null })}
               onMove={handleMove}
               onViewBoxChange={setViewBox}
             />
@@ -1063,9 +1209,9 @@ function App() {
               <button onClick={recalculate} disabled={isBusy}>Recalculate</button>
               <button
                 onClick={normalizeCoordinates}
-                disabled={isBusy}
+                disabled={isBusy || selection.primary === null}
                 aria-label="Normalize coordinates"
-                title="Normalize coordinates by moving the composition origin to its painted top-left without changing relative placement"
+                title="Set the selected glyph to 0,0 without changing relative placement"
               >
                 Normalize
               </button>
@@ -1087,15 +1233,7 @@ function App() {
                   onChange={(event) => {
                     const x = Number(event.target.value)
                     if (Number.isFinite(x)) {
-                      updateDesign((current) =>
-                        withUpdatedTime({
-                          ...current,
-                          overlapsStale: true,
-                          glyphs: current.glyphs.map((glyph, index) =>
-                            index === selectedGlyph ? { ...glyph, x } : glyph,
-                          ),
-                        }),
-                      )
+                      updatePrimaryCoordinate('x', x)
                     }
                   }}
                 />
@@ -1110,15 +1248,7 @@ function App() {
                   onChange={(event) => {
                     const y = Number(event.target.value)
                     if (Number.isFinite(y)) {
-                      updateDesign((current) =>
-                        withUpdatedTime({
-                          ...current,
-                          overlapsStale: true,
-                          glyphs: current.glyphs.map((glyph, index) =>
-                            index === selectedGlyph ? { ...glyph, y } : glyph,
-                          ),
-                        }),
-                      )
+                      updatePrimaryCoordinate('y', y)
                     }
                   }}
                 />
@@ -1135,7 +1265,7 @@ function App() {
                       refreshMixedOverlapColors(withUpdatedTime({
                         ...current,
                         glyphs: current.glyphs.map((glyph, index) =>
-                          index === selectedGlyph ? { ...glyph, color } : glyph,
+                          index === selection.primary ? { ...glyph, color } : glyph,
                         ),
                       })),
                     )
@@ -1144,12 +1274,17 @@ function App() {
               </label>
               <button
                 className="following-toggle"
-                aria-label="Move selected glyph and following glyphs together"
-                aria-pressed={moveMode === 'following'}
-                title="Move selected glyph and following glyphs together"
-                onClick={() =>
-                  setMoveMode((current) => current === 'following' ? 'single' : 'following')
-                }
+                aria-label={`Select ${glyphLabel(selectedCharacter)} and following glyphs`}
+                title={`Select ${glyphLabel(selectedCharacter)} and following glyphs`}
+                onClick={() => {
+                  const primary = selection.primary
+                  if (primary !== null) {
+                    setSelection({
+                      indices: characters.map((_, index) => index).slice(primary),
+                      primary,
+                    })
+                  }
+                }}
               >
                 <svg className="chain-link-icon" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -1167,7 +1302,7 @@ function App() {
               return (
                 <div
                   className={`pair-row${
-                    selectedGlyph !== null && overlap.glyphIndices.includes(selectedGlyph)
+                    overlap.glyphIndices.some((glyphIndex) => selectedGlyphs.has(glyphIndex))
                       ? ' is-related'
                       : ''
                   }`}

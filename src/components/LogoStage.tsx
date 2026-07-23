@@ -10,28 +10,29 @@ import { buildSvgMarkup } from '../domain/svg'
 import type {
   DesignDocument,
   FontRuntime,
-  MoveMode,
   Point,
   Rect,
 } from '../domain/types'
+
+export type GlyphSelectionAction = 'replace' | 'toggle' | 'primary'
 
 interface LogoStageProps {
   design: DesignDocument
   font: FontRuntime
   viewBox: Rect
   background: string
-  selectedGlyph: number | null
-  moveMode: MoveMode
-  onSelect: (index: number) => void
+  selectedGlyphs: readonly number[]
+  primaryGlyph: number | null
+  onSelect: (index: number, action: GlyphSelectionAction) => void
   onClearSelection: () => void
-  onMove: (index: number, delta: Point, mode: MoveMode) => void
+  onMove: (indices: readonly number[], delta: Point) => void
   onViewBoxChange: (viewBox: Rect) => void
 }
 
 type DragState =
   | {
       kind: 'glyph'
-      index: number
+      indices: readonly number[]
       previous: Point
     }
   | {
@@ -57,8 +58,8 @@ export function LogoStage({
   font,
   viewBox,
   background,
-  selectedGlyph,
-  moveMode,
+  selectedGlyphs,
+  primaryGlyph,
   onSelect,
   onClearSelection,
   onMove,
@@ -72,11 +73,12 @@ export function LogoStage({
       buildSvgMarkup(design, font, {
         renderId,
         viewBox,
-        selectedGlyph,
+        selectedGlyphs,
+        primaryGlyph,
         interactive: true,
         className: 'logo-svg',
       }),
-    [design, font, renderId, selectedGlyph, viewBox],
+    [design, font, primaryGlyph, renderId, selectedGlyphs, viewBox],
   )
 
   function beginDrag(event: PointerEvent<HTMLDivElement>) {
@@ -86,9 +88,17 @@ export function LogoStage({
         : null
     const hitIndex = Number(hit?.dataset.glyphHit)
     if (hit && Number.isInteger(hitIndex) && event.button === 0 && !spacePressed) {
+      event.preventDefault()
+      event.currentTarget.focus({ preventScroll: true })
+      if (event.shiftKey) {
+        onSelect(hitIndex, 'toggle')
+        return
+      }
       const point = clientToSvg(event.currentTarget, event.clientX, event.clientY)
-      onSelect(hitIndex)
-      drag.current = { kind: 'glyph', index: hitIndex, previous: point }
+      const alreadySelected = selectedGlyphs.includes(hitIndex)
+      const dragIndices = alreadySelected ? selectedGlyphs : [hitIndex]
+      onSelect(hitIndex, alreadySelected ? 'primary' : 'replace')
+      drag.current = { kind: 'glyph', indices: dragIndices, previous: point }
     } else if (spacePressed || event.button === 1) {
       event.preventDefault()
       drag.current = {
@@ -115,7 +125,7 @@ export function LogoStage({
         x: point.x - drag.current.previous.x,
         y: point.y - drag.current.previous.y,
       }
-      onMove(drag.current.index, delta, moveMode)
+      onMove(drag.current.indices, delta)
       drag.current.previous = point
     } else {
       const bounds = event.currentTarget.getBoundingClientRect()
@@ -161,9 +171,9 @@ export function LogoStage({
       ArrowDown: { x: 0, y: step },
     }
     const delta = deltas[event.key]
-    if (delta && selectedGlyph !== null) {
+    if (delta && selectedGlyphs.length > 0) {
       event.preventDefault()
-      onMove(selectedGlyph, delta, moveMode)
+      onMove(selectedGlyphs, delta)
     }
   }
 
@@ -187,7 +197,7 @@ export function LogoStage({
       className={`editor-stage${spacePressed ? ' is-panning' : ''}`}
       style={{ background }}
       role="application"
-      aria-label="Interactive logo proof. Drag a letter to move it. Click empty space or press Escape to clear the selection. Hold Space and drag to pan. Use arrow keys to nudge the selected letter."
+      aria-label="Interactive logo proof. Click a letter to select it, or Shift-click to select multiple letters. Drag a selected letter to move the selection. Click empty space or press Escape to clear the selection. Hold Space and drag to pan. Use arrow keys to nudge selected letters."
       tabIndex={0}
       data-testid="editor-stage"
       onPointerDown={beginDrag}
