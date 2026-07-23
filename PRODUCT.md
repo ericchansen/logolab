@@ -1,0 +1,44 @@
+# Logo Lab
+
+## Product
+
+Logo Lab is a client-only creative tool for turning real font outlines into distinctive,
+export-ready marks. It serves design-savvy builders working at a laptop and keeps minute
+positioning changes calm, exact, and immediate.
+
+## Personality
+
+Precise, expressive, effortless. Borrow Figma precision and Framer polish without copying
+their branding. The interface disappears into the work; the artwork carries the personality.
+
+## Principles
+
+1. Canvas before chrome. Open directly on the fitted Rubik `Logo Lab` composition.
+   Compact, content-driven controls flank the dominant canvas without becoming full-height rails.
+2. Trust the geometry. Preserve native curves, discover exact occupancy sets, and use one
+   pair-relative renderer for editor proofs and exports.
+3. Reveal complexity in context. Keep creation controls dense and legible without explaining
+   the product inside the workbench.
+4. Prefer the object to its label. Interact with a proof to change its background; self-evident
+   controls keep precise accessible names without permanent captions.
+5. Make accuracy explicit. Position edits mark overlap records stale; Recalculate is always
+   available; Normalize coordinates deliberately moves the composition origin from painted bounds;
+   export recalculates before writing.
+6. Keep local behavior quiet. Fonts, designs, and exports stay in the browser without privacy
+   marketing or permanent save-success UI.
+
+## Non-negotiable behavior
+
+- Text updates live and preserves case and whitespace.
+- Built-in and local fonts use real OpenType outlines without reconstruction or distortion.
+- Overlap identity is a sorted set of glyph indices and may be non-adjacent or N-way.
+- Mixed colors are deterministic sRGB averages; custom colors remain explicit.
+- Empty-canvas click and Escape clear selection. Glyph drag selects; Space+drag pans.
+- SVG, proportional PNG, and schema-v2 JSON export from refreshed geometry.
+- The complete workflow is keyboard operable and usable at 390 px.
+
+## Anti-reference
+
+No marketing hero, title lockup in chrome, product pitch, privacy copy, cloud icon, redundant
+headings, no-selection instruction, Apply button, stacked dashboard cards, giant radii,
+decorative blobs, gradients, glass, or generic SaaS whitespace.

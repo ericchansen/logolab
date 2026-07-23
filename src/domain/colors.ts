@@ -13,39 +13,25 @@ const GLYPH_COLORS = [
   '#004E8C',
 ]
 
-const PAIR_COLORS = [
-  '#00A4EF',
-  '#FFB900',
-  '#7FBA00',
-  '#F25022',
-  '#8661C5',
-  '#00B294',
-  '#D13438',
-  '#4F6BED',
-  '#C19C00',
-  '#E43BA6',
-  '#13A10E',
-]
-
 export function glyphColor(index: number): string {
   return GLYPH_COLORS[index % GLYPH_COLORS.length] ?? '#1B6EF3'
-}
-
-export function pairColor(index: number): string {
-  return PAIR_COLORS[index % PAIR_COLORS.length] ?? '#00A4EF'
 }
 
 function channel(hex: string, offset: number): number {
   return Number.parseInt(hex.slice(offset, offset + 2), 16)
 }
 
-export function suggestOverlapColor(left: string, right: string): string {
-  const normalizedLeft = left.replace('#', '').padEnd(6, '0')
-  const normalizedRight = right.replace('#', '').padEnd(6, '0')
+export function mixSrgbColors(colors: string[]): string {
+  if (colors.length === 0) {
+    throw new Error('At least one color is required to mix an overlap.')
+  }
+  const normalized = colors.map((color) => color.replace('#', '').padEnd(6, '0'))
   const values = [0, 2, 4].map((offset) =>
-    Math.round(
-      (channel(normalizedLeft, offset) + channel(normalizedRight, offset)) / 2,
-    ),
+    Math.round(normalized.reduce((sum, color) => sum + channel(color, offset), 0) / normalized.length),
   )
   return `#${values.map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+}
+
+export function suggestOverlapColor(left: string, right: string): string {
+  return mixSrgbColors([left, right])
 }

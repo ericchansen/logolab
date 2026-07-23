@@ -1,13 +1,13 @@
 # Bundled font notices
 
-Logo Lab includes four unmodified variable font binaries as static browser assets:
+Logo Lab includes static font binaries for logo rendering. Figtree also supplies the interface
+font:
 
-| Asset | Font project | Weight used |
+| Asset | Source | Use |
 | --- | --- | --- |
-| `public/fonts/Sora-Variable.ttf` | [Sora](https://github.com/sora-xor/sora-font) | 800 |
-| `public/fonts/Figtree-Variable.ttf` | [Figtree](https://github.com/erikdkennedy/figtree) | 800 |
-| `public/fonts/WorkSans-Variable.ttf` | [Work Sans](https://github.com/weiweihuanghuang/Work-Sans) | 800 |
-| `public/fonts/Rubik-Variable.ttf` | [Rubik](https://github.com/googlefonts/rubik) | 800 |
+| `src/assets/Figtree-Variable.woff2` | [Figtree variable webfont](https://github.com/erikdkennedy/figtree/blob/032dfa7fe219ef3a02890d6d3add84eacc9aebfe/fonts/webfonts/Figtree%5Bwght%5D.woff2) | UI weights 400-600 |
+| `public/fonts/Figtree-Black.ttf` | [Figtree](https://github.com/erikdkennedy/figtree) | Logo outlines |
 
-Each project's copyright notice and complete SIL Open Font License 1.1 text is in its
-adjacent `OFL.txt` file. These font files are not covered by Logo Lab's MIT license.
+Both Figtree files use the copyright notice and SIL Open Font License 1.1 in
+`Figtree/OFL.txt`. Other bundled font licenses are in their adjacent directories. Font files
+are not covered by Logo Lab's MIT license.
