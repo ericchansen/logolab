@@ -4,18 +4,21 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type FormEvent,
+  type CSSProperties,
 } from 'react'
 import { LogoStage } from './components/LogoStage'
-import { suggestOverlapColor } from './domain/colors'
-import { createDesign, validatePortableDesign } from './domain/design'
+import { RUBIK_LOGO_LAB_PRESET } from './domain/defaultPreset'
 import {
-  downloadDesign,
-  downloadPng,
-  downloadSvg,
-} from './domain/export'
+  createDesign,
+  refreshMixedOverlapColors,
+  resolveDesign,
+  validatePortableDesign,
+} from './domain/design'
+import { downloadDesign, downloadPng, downloadSvg } from './domain/export'
 import {
   BUILT_IN_FONTS,
+  DEFAULT_FONT_ID,
+  builtInFontUrl,
   createStoredFont,
   loadBuiltInFont,
   loadStoredFont,
@@ -24,14 +27,18 @@ import {
 import {
   expandRect,
   getDesignBounds,
-  horizontalOverlap,
+  getPaintedBounds,
   moveGlyphs,
+  normalizeDesignCoordinates,
 } from './domain/geometry'
+import { recalculateOverlaps } from './domain/overlaps'
 import {
+  deleteStoredFont,
   getStoredFonts,
   loadDesign,
   putStoredFont,
-  saveDesign,
+  removeDesignsForFont,
+  trySaveDesign,
 } from './domain/persistence'
 import { buildSvgMarkup } from './domain/svg'
 import type {
@@ -44,7 +51,8 @@ import type {
   StoredFont,
 } from './domain/types'
 
-const INITIAL_TEXT = 'Logo'
+const INITIAL_TEXT = 'Logo Lab'
+const PNG_PRESETS = [512, 1024, 2048, 4096]
 let proofRenderSequence = 0
 
 function withUpdatedTime(design: DesignDocument): DesignDocument {
@@ -56,7 +64,15 @@ function proofMarkup(
   font: FontRuntime,
   renderId: string,
 ): string {
-  return buildSvgMarkup(design, font, { renderId, className: 'logo-svg' })
+  return buildSvgMarkup(design, font, {
+    renderId,
+    viewBox: getPaintedBounds(design, font),
+    className: 'logo-svg',
+  })
+}
+
+function glyphLabel(character: string): string {
+  return character === ' ' ? '␠' : character
 }
 
 function App() {
@@ -64,7 +80,9 @@ function App() {
   const [font, setFont] = useState<FontRuntime | null>(null)
   const [design, setDesign] = useState<DesignDocument | null>(null)
   const [textDraft, setTextDraft] = useState(INITIAL_TEXT)
-  const [selectedGlyph, setSelectedGlyph] = useState(0)
+  const [smallProofDraft, setSmallProofDraft] = useState('32')
+  const [isSmallProofEditing, setIsSmallProofEditing] = useState(false)
+  const [selectedGlyph, setSelectedGlyph] = useState<number | null>(0)
   const [moveMode, setMoveMode] = useState<MoveMode>('single')
   const [viewBox, setViewBox] = useState<Rect>({
     x: 0,
@@ -72,10 +90,21 @@ function App() {
     width: 3600,
     height: 1400,
   })
-  const [status, setStatus] = useState('Loading Sora ExtraBold…')
+  const [status, setStatus] = useState('Loading…')
   const [error, setError] = useState('')
+  const [geometryFeedback, setGeometryFeedback] = useState('')
   const [isBusy, setIsBusy] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const requestId = useRef(0)
+  const exportId = useRef(0)
+  const editVersion = useRef(0)
+  const textVersion = useRef(0)
+  const textDraftRef = useRef(INITIAL_TEXT)
+  const pendingFontSpec = useRef<FontSpec | null>(null)
+  const autosaveSuppressed = useRef(false)
+  const deletedFontIds = useRef(new Set<string>())
+  const tombstonedFonts = useRef(new Map<string, StoredFont>())
+  const smallProofEditStart = useRef(32)
 
   const fontSpecs = useMemo<FontSpec[]>(
     () => [
@@ -85,53 +114,154 @@ function App() {
         name,
         fileName,
         source: 'local' as const,
+        previewFamily: `Logo Lab Local ${id}`,
       })),
     ],
     [storedFonts],
   )
 
+  function persistDesign(nextDesign: DesignDocument): boolean {
+    if (deletedFontIds.current.has(nextDesign.fontId)) {
+      return true
+    }
+    const result = trySaveDesign(nextDesign)
+    if (result.ok) {
+      return true
+    }
+    setError('Could not save locally. Free browser storage or export JSON, then try again.')
+    return false
+  }
+
+  function validatedDraft(): string | null {
+    if (Array.from(textDraft).length === 0) {
+      setError('Text cannot be empty.')
+      return null
+    }
+    return textDraft
+  }
+
+  function replaceTextDraft(text: string) {
+    textDraftRef.current = text
+    setTextDraft(text)
+  }
+
+  function specForFont(fontId: string): FontSpec | undefined {
+    const available = fontSpecs.find((candidate) => candidate.id === fontId)
+    if (available) {
+      return available
+    }
+    const tombstoned = tombstonedFonts.current.get(fontId)
+    return tombstoned
+      ? {
+          id: tombstoned.id,
+          name: tombstoned.name,
+          fileName: tombstoned.fileName,
+          source: 'local',
+        }
+      : undefined
+  }
+
+  async function loadRuntime(spec: FontSpec, text: string): Promise<FontRuntime> {
+    const storedFont =
+      spec.source === 'local'
+        ? storedFonts.find((candidate) => candidate.id === spec.id) ??
+          tombstonedFonts.current.get(spec.id)
+        : undefined
+    return storedFont
+      ? loadStoredFont(storedFont, text)
+      : loadBuiltInFont(spec, text)
+  }
+
+  useEffect(() => {
+    const loadedFaces: FontFace[] = []
+    const specs = [
+      ...BUILT_IN_FONTS.map((spec) => ({
+        family: spec.previewFamily,
+        source: `url("${builtInFontUrl(spec)}")`,
+      })),
+      ...storedFonts.map((stored) => ({
+        family: `Logo Lab Local ${stored.id}`,
+        source: `url("${stored.dataUrl}")`,
+      })),
+    ]
+    for (const spec of specs) {
+      if (!spec.family) {
+        continue
+      }
+      const face = new FontFace(spec.family, spec.source)
+      loadedFaces.push(face)
+      void face.load().then((loaded) => document.fonts.add(loaded)).catch(() => undefined)
+    }
+    return () => {
+      for (const face of loadedFaces) {
+        document.fonts.delete(face)
+      }
+    }
+  }, [storedFonts])
+
   async function openDesign(
     spec: FontSpec,
     text: string,
     imported?: DesignDocument,
-  ): Promise<void> {
-    if (design) {
-      saveDesign(design)
+    skipCurrentSave = false,
+  ): Promise<DesignDocument | null> {
+    if (design && !skipCurrentSave && !persistDesign(design)) {
+      return null
     }
     const operation = ++requestId.current
+    const startingEditVersion = editVersion.current
+    const startingTextVersion = textVersion.current
+    pendingFontSpec.current = spec
     setIsBusy(true)
     setError('')
     setStatus(`Loading ${spec.name}…`)
     try {
-      const storedFont =
-        spec.source === 'local'
-          ? storedFonts.find((candidate) => candidate.id === spec.id)
-          : undefined
-      const runtime = storedFont
-        ? loadStoredFont(storedFont, text)
-        : await loadBuiltInFont(spec, text)
+      const runtime = await loadRuntime(spec, text)
       if (operation !== requestId.current) {
-        return
+        return null
       }
-      const nextDesign =
-        imported ?? loadDesign(spec.id, text) ?? createDesign(runtime, text)
+      if (startingTextVersion !== textVersion.current) {
+        const latestText = textDraftRef.current
+        if (Array.from(latestText).length === 0) {
+          pendingFontSpec.current = null
+          setError('Text cannot be empty.')
+          return null
+        }
+        return openDesign(spec, latestText, imported, skipCurrentSave)
+      }
+      if (startingEditVersion !== editVersion.current) {
+        pendingFontSpec.current = null
+        setError('The design changed while the font was loading. Choose the font again.')
+        return null
+      }
+      const savedDesign = imported ?? loadDesign(spec.id, text)
+      const initialDesign =
+        savedDesign ??
+        (spec.id === DEFAULT_FONT_ID && text === INITIAL_TEXT
+          ? RUBIK_LOGO_LAB_PRESET
+          : createDesign(runtime, text))
+      const nextDesign = resolveDesign(initialDesign, runtime)
       if (nextDesign.glyphs.length !== runtime.outlines.length) {
         throw new Error('The saved design no longer matches its text.')
       }
       setFont(runtime)
       setDesign(nextDesign)
-      setTextDraft(text)
+      replaceTextDraft(text)
+      pendingFontSpec.current = null
       setSelectedGlyph((current) =>
-        Math.min(current, nextDesign.glyphs.length - 1),
+        current === null ? null : Math.min(current, nextDesign.glyphs.length - 1),
       )
-      setViewBox(expandRect(getDesignBounds(nextDesign, runtime), 100))
-      setStatus('Saved locally')
+      setViewBox(expandRect(getPaintedBounds(nextDesign, runtime), 100))
+      setStatus('')
+      return nextDesign
     } catch (caught) {
       if (operation !== requestId.current) {
-        return
+        return null
       }
+      pendingFontSpec.current = null
       setError(caught instanceof Error ? caught.message : 'The font could not be loaded.')
-      setStatus('Could not load design')
+      setStatus('')
+      return null
     } finally {
       if (operation === requestId.current) {
         setIsBusy(false)
@@ -149,7 +279,7 @@ function App() {
       })
       .catch(() => {
         if (active) {
-          setStatus('Local fonts could not be restored')
+          setError('Local fonts could not be restored.')
         }
       })
     return () => {
@@ -158,26 +288,119 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const firstFont = BUILT_IN_FONTS[0]
-    if (firstFont) {
-      void openDesign(firstFont, INITIAL_TEXT)
+    const defaultFont = BUILT_IN_FONTS.find((candidate) => candidate.id === DEFAULT_FONT_ID)
+    if (defaultFont) {
+      void openDesign(defaultFont, INITIAL_TEXT)
     }
   }, [])
 
   useEffect(() => {
-    if (design) {
-      saveDesign(design)
-      setStatus('Saved locally')
+    if (!design || autosaveSuppressed.current) {
+      return
     }
+    setIsSaving(true)
+    if (!persistDesign(design)) {
+      setIsSaving(false)
+      return
+    }
+    const timer = window.setTimeout(() => setIsSaving(false), 180)
+    return () => window.clearTimeout(timer)
   }, [design])
 
+  useEffect(() => {
+    if (design && !isSmallProofEditing) {
+      setSmallProofDraft(String(design.smallProofPx))
+    }
+  }, [design, isSmallProofEditing])
+
+  useEffect(() => {
+    if (!design || textDraft === design.text) {
+      return
+    }
+    const scheduledRequest = requestId.current
+    const timer = window.setTimeout(() => {
+      if (scheduledRequest !== requestId.current) {
+        return
+      }
+      if (Array.from(textDraft).length === 0) {
+        setError('Text cannot be empty.')
+        return
+      }
+      const activeSpec = pendingFontSpec.current ?? specForFont(design.fontId)
+      if (activeSpec) {
+        void openDesign(activeSpec, textDraft)
+      }
+    }, 240)
+    return () => window.clearTimeout(timer)
+  }, [design, fontSpecs, textDraft])
+
   function updateDesign(update: (current: DesignDocument) => DesignDocument) {
+    editVersion.current += 1
+    setGeometryFeedback('')
     setDesign((current) => (current ? update(current) : current))
+  }
+
+  function updateSmallProofDraft(value: string) {
+    setSmallProofDraft(value)
+    if (value.trim() === '') {
+      return
+    }
+    const size = Number(value)
+    if (Number.isInteger(size) && size >= 8 && size <= 64) {
+      setError('')
+      updateDesign((current) =>
+        withUpdatedTime({ ...current, smallProofPx: size }),
+      )
+    }
+  }
+
+  function commitSmallProofDraft() {
+    if (!design) {
+      return
+    }
+    const size = Number(smallProofDraft)
+    if (
+      smallProofDraft.trim() === '' ||
+      !Number.isInteger(size) ||
+      size < 8 ||
+      size > 64
+    ) {
+      setError('Small proof size must be a whole number from 8 to 64 px.')
+      setSmallProofDraft(String(design.smallProofPx))
+    } else {
+      setError('')
+      setSmallProofDraft(String(size))
+      if (design.smallProofPx !== size) {
+        updateDesign((current) =>
+          withUpdatedTime({ ...current, smallProofPx: size }),
+        )
+      }
+    }
+    setIsSmallProofEditing(false)
+  }
+
+  function cancelSmallProofEdit() {
+    const size = smallProofEditStart.current
+    setSmallProofDraft(String(size))
+    setError('')
+    setIsSmallProofEditing(false)
+    if (design?.smallProofPx !== size) {
+      updateDesign((current) =>
+        withUpdatedTime({ ...current, smallProofPx: size }),
+      )
+    }
+  }
+
+  function switchFont(spec: FontSpec) {
+    const draft = validatedDraft()
+    if (draft) {
+      void openDesign(spec, draft)
+    }
   }
 
   function fitProof() {
     if (design && font) {
-      setViewBox(expandRect(getDesignBounds(design, font), 100))
+      setViewBox(expandRect(getPaintedBounds(design, font), 100))
     }
   }
 
@@ -200,16 +423,168 @@ function App() {
     updateDesign((current) => moveGlyphs(current, index, delta, mode))
   }
 
-  function submitText(event: FormEvent) {
-    event.preventDefault()
-    const characters = Array.from(textDraft)
-    if (characters.length < 1 || characters.length > 12) {
-      setError('Enter between 1 and 12 characters.')
+  function recalculate() {
+    if (!design || !font) {
       return
     }
-    const activeSpec = fontSpecs.find((candidate) => candidate.id === design?.fontId)
-    if (activeSpec) {
-      void openDesign(activeSpec, characters.join(''))
+    const refreshed = recalculateOverlaps(design, font)
+    editVersion.current += 1
+    setDesign(refreshed)
+    persistDesign(refreshed)
+    setGeometryFeedback('')
+  }
+
+  function normalizeCoordinates() {
+    if (!design || !font) {
+      return
+    }
+    setError('')
+    setGeometryFeedback('')
+    try {
+      const normalized = normalizeDesignCoordinates(design, font)
+      if (normalized === design) {
+        setGeometryFeedback('Coordinates are already normalized.')
+        return
+      }
+      const refreshed = recalculateOverlaps(normalized, font)
+      editVersion.current += 1
+      setDesign(refreshed)
+      setViewBox(expandRect(getPaintedBounds(refreshed, font), 100))
+      if (persistDesign(refreshed)) {
+        setGeometryFeedback('Coordinates normalized.')
+      }
+    } catch (caught) {
+      setGeometryFeedback('')
+      const detail = caught instanceof Error ? ` ${caught.message}` : ''
+      setError(`Coordinates could not be normalized.${detail}`)
+    }
+  }
+
+  async function prepareExport(): Promise<{
+    design: DesignDocument
+    font: FontRuntime
+  } | null> {
+    if (!design || !font) {
+      return null
+    }
+    const operation = ++exportId.current
+    const startingRequest = requestId.current
+    const startingEditVersion = editVersion.current
+    const startingTextVersion = textVersion.current
+    const startingDesign = design
+    const draft = textDraft
+    setIsBusy(true)
+    setError('')
+    try {
+      let accurateDesign = startingDesign
+      let accurateFont = font
+      if (draft !== startingDesign.text) {
+        if (Array.from(draft).length === 0) {
+          setError('Text cannot be empty.')
+          return null
+        }
+        const activeSpec = specForFont(startingDesign.fontId)
+        if (!activeSpec) {
+          setError('The active font is unavailable.')
+          return null
+        }
+        accurateFont = await loadRuntime(activeSpec, draft)
+        if (
+          operation !== exportId.current ||
+          startingRequest !== requestId.current
+        ) {
+          return null
+        }
+        const savedDesign = loadDesign(activeSpec.id, draft)
+        const initialDesign =
+          savedDesign ??
+          (activeSpec.id === DEFAULT_FONT_ID && draft === INITIAL_TEXT
+            ? RUBIK_LOGO_LAB_PRESET
+            : createDesign(accurateFont, draft))
+        accurateDesign = resolveDesign(initialDesign, accurateFont)
+      }
+      if (
+        operation !== exportId.current ||
+        startingRequest !== requestId.current
+      ) {
+        return null
+      }
+      if (startingEditVersion !== editVersion.current) {
+        setError('The design changed while export was preparing. Export again.')
+        return null
+      }
+      if (startingTextVersion !== textVersion.current) {
+        setError('The text changed while export was preparing. Export again.')
+        return null
+      }
+      if (accurateDesign.overlapsStale) {
+        accurateDesign = recalculateOverlaps(accurateDesign, accurateFont)
+      }
+      if (
+        operation !== exportId.current ||
+        startingRequest !== requestId.current ||
+        startingEditVersion !== editVersion.current ||
+        startingTextVersion !== textVersion.current
+      ) {
+        if (
+          operation === exportId.current &&
+          startingRequest === requestId.current
+        ) {
+          setError('The design changed while export was preparing. Export again.')
+        }
+        return null
+      }
+      if (accurateDesign !== startingDesign) {
+        setFont(accurateFont)
+        setDesign(accurateDesign)
+        replaceTextDraft(draft)
+        setSelectedGlyph((current) =>
+          current === null ? null : Math.min(current, accurateDesign.glyphs.length - 1),
+        )
+        setViewBox(expandRect(getDesignBounds(accurateDesign, accurateFont), 100))
+        persistDesign(accurateDesign)
+      }
+      return { design: accurateDesign, font: accurateFont }
+    } catch (caught) {
+      if (
+        operation === exportId.current &&
+        startingRequest === requestId.current
+      ) {
+        setError(caught instanceof Error ? caught.message : 'Export failed.')
+      }
+      return null
+    } finally {
+      if (
+        operation === exportId.current &&
+        startingRequest === requestId.current
+      ) {
+        setIsBusy(false)
+      }
+    }
+  }
+
+  async function runExport(kind: 'svg' | 'png' | 'json') {
+    if (isBusy) {
+      setError('Wait for the current font operation to finish, then export again.')
+      return
+    }
+    try {
+      const prepared = await prepareExport()
+      if (!prepared) {
+        return
+      }
+      if (kind === 'svg') {
+        downloadSvg(prepared.design, prepared.font)
+      } else if (kind === 'png') {
+        await downloadPng(prepared.design, prepared.font)
+      } else {
+        const stored = storedFonts.find(
+          (candidate) => candidate.id === prepared.design.fontId,
+        ) ?? tombstonedFonts.current.get(prepared.design.fontId)
+        downloadDesign(prepared.design, stored)
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Export failed.')
     }
   }
 
@@ -227,9 +602,13 @@ function App() {
       setError('Local font files must be 10 MB or smaller.')
       return
     }
+    const targetText = validatedDraft()
+    if (!targetText) {
+      return
+    }
     const operation = ++requestId.current
     setIsBusy(true)
-    setStatus('Reading font locally…')
+    setStatus('Reading font…')
     setError('')
     try {
       const stored = await createStoredFont(file)
@@ -237,29 +616,97 @@ function App() {
         return
       }
       await putStoredFont(stored)
-      if (operation !== requestId.current) {
-        return
-      }
-      setStoredFonts((current) => [
-        ...current.filter((fontItem) => fontItem.id !== stored.id),
+      deletedFontIds.current.delete(stored.id)
+      tombstonedFonts.current.delete(stored.id)
+      const nextFonts = [
+        ...storedFonts.filter((candidate) => candidate.id !== stored.id),
         stored,
-      ])
-      const text = design?.text ?? INITIAL_TEXT
-      const runtime = loadStoredFont(stored, text)
-      const nextDesign = loadDesign(stored.id, text) ?? createDesign(runtime, text)
+      ]
+      setStoredFonts(nextFonts)
+      const runtime = loadStoredFont(stored, targetText)
+      const nextDesign = resolveDesign(
+        loadDesign(stored.id, targetText) ??
+          createDesign(runtime, targetText),
+        runtime,
+      )
       setFont(runtime)
       setDesign(nextDesign)
+      replaceTextDraft(targetText)
       setViewBox(expandRect(getDesignBounds(nextDesign, runtime), 100))
-      setStatus(`${stored.name} is stored only in this browser`)
+      setStatus('')
     } catch (caught) {
-      if (operation !== requestId.current) {
-        return
-      }
       setError(caught instanceof Error ? caught.message : 'The font could not be read.')
-      setStatus('Font upload failed')
+      setStatus('')
     } finally {
       if (operation === requestId.current) {
         setIsBusy(false)
+      }
+    }
+  }
+
+  async function removeLocalFont(stored: StoredFont) {
+    if (!window.confirm(`Remove ${stored.name} and its saved designs from this browser?`)) {
+      return
+    }
+    const wasActive = design?.fontId === stored.id
+    const activeDesign = design
+    const activeFont = font
+    const activeDraft = textDraft
+    let fontDeleted = false
+    let fallbackOpened = false
+    if (wasActive) {
+      requestId.current += 1
+      autosaveSuppressed.current = true
+      setIsBusy(true)
+      setStatus(`Removing ${stored.name}…`)
+      setDesign(null)
+      setFont(null)
+    }
+    try {
+      await deleteStoredFont(stored.id)
+      fontDeleted = true
+      deletedFontIds.current.add(stored.id)
+      tombstonedFonts.current.set(stored.id, stored)
+      let cleanupError: unknown
+      try {
+        removeDesignsForFont(stored.id)
+      } catch (caught) {
+        cleanupError = caught
+      }
+      setStoredFonts((current) => current.filter((candidate) => candidate.id !== stored.id))
+      if (wasActive) {
+        const fallback = BUILT_IN_FONTS.find((candidate) => candidate.id === DEFAULT_FONT_ID)
+        if (!fallback) {
+          throw new Error('The fallback font is unavailable.')
+        }
+        const opened = await openDesign(
+          fallback,
+          Array.from(activeDraft).length > 0 ? activeDraft : activeDesign?.text ?? INITIAL_TEXT,
+          undefined,
+          true,
+        )
+        if (!opened) {
+          throw new Error('The local font was removed, but the fallback font could not load.')
+        }
+        fallbackOpened = true
+      }
+      if (cleanupError) {
+        throw cleanupError instanceof Error
+          ? cleanupError
+          : new Error('The saved local-font designs could not be removed.')
+      }
+    } catch (caught) {
+      if (wasActive && (!fontDeleted || !fallbackOpened)) {
+        setDesign(activeDesign)
+        setFont(activeFont)
+        replaceTextDraft(activeDraft)
+      }
+      setError(caught instanceof Error ? caught.message : 'The local font could not be removed.')
+    } finally {
+      if (wasActive) {
+        autosaveSuppressed.current = false
+        setIsBusy(false)
+        setStatus('')
       }
     }
   }
@@ -270,163 +717,243 @@ function App() {
     if (!file) {
       return
     }
-    const operation = ++requestId.current
     setIsBusy(true)
-    setStatus('Importing design locally…')
     setError('')
     try {
       const portable = validatePortableDesign(JSON.parse(await file.text()))
-      if (operation !== requestId.current) {
-        return
-      }
-      let importedDesign = portable.design
       let importedFonts = storedFonts
       if (portable.font) {
         if (BUILT_IN_FONTS.some((candidate) => candidate.id === portable.font?.id)) {
           throw new Error('A local font cannot use a built-in font identity.')
         }
-        const normalizedFont = await normalizeStoredFont(portable.font)
-        if (operation !== requestId.current) {
-          return
-        }
-        if (importedDesign.fontId !== normalizedFont.id) {
+        const normalized = await normalizeStoredFont(portable.font)
+        if (portable.design.fontId !== normalized.id) {
           throw new Error('The imported design and local font identities do not match.')
         }
-        await putStoredFont(normalizedFont)
-        if (operation !== requestId.current) {
-          return
-        }
+        await putStoredFont(normalized)
+        deletedFontIds.current.delete(normalized.id)
+        tombstonedFonts.current.delete(normalized.id)
         importedFonts = [
-          ...storedFonts.filter((candidate) => candidate.id !== normalizedFont.id),
-          normalizedFont,
+          ...storedFonts.filter((candidate) => candidate.id !== normalized.id),
+          normalized,
         ]
         setStoredFonts(importedFonts)
       }
-      const builtInSpec = BUILT_IN_FONTS.find(
-        (candidate) => candidate.id === importedDesign.fontId,
-      )
-      const importedFont = importedFonts.find(
-        (candidate) => candidate.id === importedDesign.fontId,
-      )
-      const spec: FontSpec | undefined =
-        builtInSpec ??
-        (importedFont
-          ? {
-              id: importedFont.id,
-              name: importedFont.name,
-              fileName: importedFont.fileName,
-              source: 'local',
-            }
-          : undefined)
+      const spec =
+        BUILT_IN_FONTS.find((candidate) => candidate.id === portable.design.fontId) ??
+        importedFonts
+          .filter((candidate) => candidate.id === portable.design.fontId)
+          .map<FontSpec>((candidate) => ({
+            id: candidate.id,
+            name: candidate.name,
+            fileName: candidate.fileName,
+            source: 'local',
+          }))[0]
       if (!spec) {
         throw new Error('This design needs a local font that was not included.')
       }
-      const stored =
-        spec.source === 'local'
-          ? importedFonts.find((candidate) => candidate.id === spec.id)
-          : undefined
+      const stored = importedFonts.find((candidate) => candidate.id === spec.id)
       const runtime = stored
-        ? loadStoredFont(stored, importedDesign.text)
-        : await loadBuiltInFont(spec, importedDesign.text)
-      if (operation !== requestId.current) {
-        return
-      }
-      importedDesign = { ...importedDesign, fontId: spec.id, fontName: spec.name }
-      saveDesign(importedDesign)
+        ? loadStoredFont(stored, portable.design.text)
+        : await loadBuiltInFont(spec, portable.design.text)
+      const imported = resolveDesign(portable.design, runtime)
       setFont(runtime)
-      setDesign(importedDesign)
-      setTextDraft(importedDesign.text)
-      setViewBox(expandRect(getDesignBounds(importedDesign, runtime), 100))
-      setStatus('Design imported and saved locally')
+      setDesign(imported)
+      replaceTextDraft(imported.text)
+      setViewBox(expandRect(getPaintedBounds(imported, runtime), 100))
+      persistDesign(imported)
     } catch (caught) {
-      if (operation !== requestId.current) {
-        return
-      }
       setError(caught instanceof Error ? caught.message : 'The design could not be imported.')
-      setStatus('Design import failed')
     } finally {
-      if (operation === requestId.current) {
-        setIsBusy(false)
-      }
+      setIsBusy(false)
     }
   }
 
   if (!font || !design) {
-    return (
-      <main className="loading-shell">
-        <div className="brand-mark" aria-hidden="true">
-          <span />
-          <span />
-        </div>
-        <p>{error || status}</p>
-      </main>
-    )
+    return <main className="loading-shell" aria-live="polite">{error || status}</main>
   }
 
-  const selected = design.glyphs[selectedGlyph]
-  const selectedCharacter = Array.from(design.text)[selectedGlyph] ?? ''
-  const selectedStoredFont = storedFonts.find((candidate) => candidate.id === design.fontId)
+  const selected = selectedGlyph === null ? undefined : design.glyphs[selectedGlyph]
+  const characters = Array.from(design.text)
+  const selectedCharacter = selectedGlyph === null ? '' : characters[selectedGlyph] ?? ''
   const tightBounds = getDesignBounds(design, font)
   const proofRenderId = ++proofRenderSequence
   const lightMarkup = proofMarkup(design, font, `light-${proofRenderId}`)
   const darkMarkup = proofMarkup(design, font, `dark-${proofRenderId}`)
   const smallMarkup = proofMarkup(design, font, `small-${proofRenderId}`)
+  const pngPreset = PNG_PRESETS.includes(design.pngLongestSide)
+    ? String(design.pngLongestSide)
+    : 'custom'
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <a className="brand" href="/" aria-label="Logo Lab home">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-          </span>
-          <span>
-            <strong>Logo Lab</strong>
-            <small>Outline composition studio</small>
-          </span>
-        </a>
-        <p className="privacy-note">
-          <span aria-hidden="true">●</span> Runs entirely in your browser
-        </p>
-      </header>
+      {error && (
+        <div className="error-banner" role="alert">
+          <span aria-hidden="true">!</span>
+          <p>{error}</p>
+          <button onClick={() => setError('')} aria-label="Dismiss error">×</button>
+        </div>
+      )}
 
-      <main>
-        <section className="intro" aria-labelledby="page-title">
-          <div>
-            <p className="eyebrow">Design with the real shapes</p>
-            <h1 id="page-title">Compose a wordmark, one outline at a time.</h1>
+      <main className="workspace" data-testid="workbench-shell">
+        <aside className="layer-rail" aria-label="Document and glyphs">
+          <div className="text-control">
+            <input
+              id="logo-text"
+              aria-label="Logo text"
+              value={textDraft}
+              spellCheck={false}
+              onChange={(event) => {
+                setError('')
+                textVersion.current += 1
+                replaceTextDraft(event.target.value)
+              }}
+            />
           </div>
-          <p>
-            Position native font glyphs, then color only the exact intersections
-            between adjacent letters. Nothing is uploaded.
-          </p>
-        </section>
 
-        <div className="workspace">
-          <section className="canvas-column" aria-label="Logo proof workspace">
-            <div className="canvas-toolbar">
-              <div className="segmented" aria-label="Glyph movement mode">
+          <details className="font-picker">
+            <summary aria-label={`Typeface, ${design.fontName}`}>
+              <strong style={{ fontFamily: font.previewFamily }}>{design.fontName}</strong>
+              <svg className="chevron-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m3.5 6 4.5 4 4.5-4" />
+              </svg>
+            </summary>
+            <div className="font-options" role="listbox" aria-label="Built-in fonts">
+              {BUILT_IN_FONTS.map((spec) => (
                 <button
-                  className={moveMode === 'single' ? 'is-active' : ''}
-                  aria-pressed={moveMode === 'single'}
-                  onClick={() => setMoveMode('single')}
+                  key={spec.id}
+                  role="option"
+                  aria-selected={design.fontId === spec.id}
+                  style={{ fontFamily: spec.previewFamily }}
+                  onClick={() => switchFont(spec)}
                 >
-                  Move one
+                  {spec.name}
                 </button>
-                <button
-                  className={moveMode === 'following' ? 'is-active' : ''}
-                  aria-pressed={moveMode === 'following'}
-                  onClick={() => setMoveMode('following')}
-                >
-                  Move with following
-                </button>
-              </div>
-              <div className="view-actions" aria-label="Proof view">
-                <button onClick={() => zoom(0.8)} aria-label="Zoom in">+</button>
-                <button onClick={() => zoom(1.25)} aria-label="Zoom out">−</button>
-                <button onClick={fitProof}>Fit</button>
-              </div>
+              ))}
+              {storedFonts.length > 0 && <span className="font-group-label">Local</span>}
+              {storedFonts.map((stored) => {
+                const spec = fontSpecs.find((candidate) => candidate.id === stored.id)
+                return (
+                  <div className="local-font-option" key={stored.id}>
+                    <button
+                      role="option"
+                      aria-selected={design.fontId === stored.id}
+                      style={{ fontFamily: spec?.previewFamily }}
+                      onClick={() => spec && switchFont(spec)}
+                    >
+                      {stored.name}
+                    </button>
+                    <button
+                      className="remove-font"
+                      aria-label={`Remove ${stored.name}`}
+                      onClick={() => void removeLocalFont(stored)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
             </div>
+          </details>
+
+          <label className="file-button">
+            Add font
+            <input
+              type="file"
+              accept=".ttf,.otf,font/ttf,font/otf"
+              disabled={isBusy}
+              onChange={(event) => void uploadFont(event)}
+            />
+          </label>
+
+          <div className="glyph-tabs" role="list" aria-label="Glyph layers">
+            {characters.map((character, index) => (
+              <button
+                key={`${character}-${index}`}
+                className={selectedGlyph === index ? 'is-active' : ''}
+                aria-pressed={selectedGlyph === index}
+                onClick={() => setSelectedGlyph(index)}
+              >
+                <span>{String(index + 1).padStart(2, '0')}</span>
+                <strong>{glyphLabel(character)}</strong>
+                <i aria-hidden="true" style={{ background: design.glyphs[index]?.color }} />
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <section className="canvas-column" aria-label="Logo proof workspace">
+          <div className="canvas-toolbar">
+            <div className="view-actions" aria-label="Proof view">
+              <button onClick={() => zoom(0.8)} aria-label="Zoom in">+</button>
+              <button onClick={() => zoom(1.25)} aria-label="Zoom out">−</button>
+              <button onClick={fitProof}>Fit</button>
+            </div>
+            <div className="header-actions" aria-label="File actions">
+              {isSaving && <span className="saving-status" role="status">Saving…</span>}
+              <label className="header-file-button">
+                Import
+                <input
+                  aria-label="Import JSON"
+                  type="file"
+                  accept=".json,application/json"
+                  disabled={isBusy}
+                  onChange={(event) => void importDesign(event)}
+                />
+              </label>
+              <details className="export-menu">
+                <summary>Export</summary>
+                <div className="export-popover">
+                  <button onClick={() => void runExport('svg')}>SVG</button>
+                  <div className="png-export-row">
+                    <label>
+                      PNG
+                      <select
+                        aria-label="PNG longest side preset"
+                        value={pngPreset}
+                        onChange={(event) => {
+                          updateDesign((current) =>
+                            withUpdatedTime({
+                              ...current,
+                              pngLongestSide:
+                                event.target.value === 'custom'
+                                  ? 4095
+                                  : Number(event.target.value),
+                            }),
+                          )
+                        }}
+                      >
+                        {PNG_PRESETS.map((size) => (
+                          <option key={size} value={size}>{size}px</option>
+                        ))}
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                    {pngPreset === 'custom' && (
+                      <input
+                        aria-label="Custom PNG longest side"
+                        type="number"
+                        min="64"
+                        max="8192"
+                        value={design.pngLongestSide}
+                        onChange={(event) => {
+                          const value = Number(event.target.value)
+                          if (Number.isFinite(value)) {
+                            updateDesign((current) =>
+                              withUpdatedTime({ ...current, pngLongestSide: value }),
+                            )
+                          }
+                        }}
+                      />
+                    )}
+                    <button onClick={() => void runExport('png')}>Download PNG</button>
+                  </div>
+                  <button onClick={() => void runExport('json')}>Design JSON</button>
+                </div>
+              </details>
+            </div>
+          </div>
+          <div className="stage-wrap">
             <LogoStage
               design={design}
               font={font}
@@ -435,361 +962,265 @@ function App() {
               selectedGlyph={selectedGlyph}
               moveMode={moveMode}
               onSelect={setSelectedGlyph}
+              onClearSelection={() => setSelectedGlyph(null)}
               onMove={handleMove}
               onViewBoxChange={setViewBox}
             />
-            <p className="canvas-help">
-              Drag a letter to move it. Hold Space and drag to pan. Arrow keys
-              nudge by 1 unit; hold Shift for 10.
-            </p>
+            <output className="canvas-bounds">
+              {Math.round(tightBounds.width)} × {Math.round(tightBounds.height)}
+            </output>
+          </div>
 
-            <section className="proof-section" aria-labelledby="proof-title">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Synchronized output</p>
-                  <h2 id="proof-title">Proofs</h2>
-                </div>
-                <span>{Math.round(tightBounds.width)} × {Math.round(tightBounds.height)} units</span>
-              </div>
-              <div className="proof-grid">
-                <figure>
-                  <div
-                    className="proof proof-large"
-                    style={{ background: design.lightBackground }}
-                    dangerouslySetInnerHTML={{ __html: lightMarkup }}
-                  />
-                  <figcaption>Light</figcaption>
-                </figure>
-                <figure>
-                  <div
-                    className="proof proof-large"
-                    style={{ background: design.darkBackground }}
-                    dangerouslySetInnerHTML={{ __html: darkMarkup }}
-                  />
-                  <figcaption>Dark</figcaption>
-                </figure>
-                <figure>
-                  <div
-                    className="proof proof-small"
-                    style={{
-                      background: design.lightBackground,
-                      height: `${design.smallProofPx}px`,
-                    }}
-                    data-testid="small-proof"
-                    dangerouslySetInnerHTML={{ __html: smallMarkup }}
-                  />
-                  <figcaption>Exact {design.smallProofPx}px</figcaption>
-                </figure>
-              </div>
-            </section>
-          </section>
-
-          <aside className="inspector" aria-label="Design controls">
-            <section>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Document</p>
-                  <h2>Set the word</h2>
-                </div>
-              </div>
-              <form className="text-form" onSubmit={submitText}>
-                <label htmlFor="logo-text">Text · 1–12 characters</label>
-                <div className="input-action">
-                  <input
-                    id="logo-text"
-                    value={textDraft}
-                    maxLength={24}
-                    spellCheck={false}
-                    onChange={(event) => setTextDraft(event.target.value)}
-                  />
-                  <button type="submit" disabled={isBusy}>Apply</button>
-                </div>
-              </form>
-              <label htmlFor="font-select">Font</label>
-              <select
-                id="font-select"
-                value={design.fontId}
-                disabled={isBusy}
-                onChange={(event) => {
-                  const spec = fontSpecs.find((candidate) => candidate.id === event.target.value)
-                  if (spec) {
-                    void openDesign(spec, design.text)
-                  }
-                }}
-              >
-                <optgroup label="Built in · ExtraBold">
-                  {BUILT_IN_FONTS.map((spec) => (
-                    <option key={spec.id} value={spec.id}>{spec.name}</option>
-                  ))}
-                </optgroup>
-                {storedFonts.length > 0 && (
-                  <optgroup label="Local fonts">
-                    {storedFonts.map((spec) => (
-                      <option key={spec.id} value={spec.id}>{spec.name}</option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-              <label className="file-button">
-                Add local TTF or OTF
-                <input
-                  type="file"
-                  accept=".ttf,.otf,font/ttf,font/otf"
-                  disabled={isBusy}
-                  onChange={(event) => void uploadFont(event)}
+          <div className="proof-grid" aria-label="Proofs">
+            <label
+              className="proof proof-large proof-interactive proof-light"
+              style={{ background: design.lightBackground }}
+            >
+              <span
+                className="proof-artwork"
+                dangerouslySetInnerHTML={{ __html: lightMarkup }}
+              />
+              <input
+                className="proof-background-input"
+                aria-label="Change light proof background"
+                title="Change light proof background"
+                type="color"
+                value={design.lightBackground}
+                onChange={(event) =>
+                  updateDesign((current) =>
+                    withUpdatedTime({ ...current, lightBackground: event.target.value }),
+                  )
+                }
+              />
+            </label>
+            <label
+              className="proof proof-large proof-interactive proof-dark"
+              style={{ background: design.darkBackground }}
+            >
+              <span
+                className="proof-artwork"
+                dangerouslySetInnerHTML={{ __html: darkMarkup }}
+              />
+              <input
+                className="proof-background-input"
+                aria-label="Change dark proof background"
+                title="Change dark proof background"
+                type="color"
+                value={design.darkBackground}
+                onChange={(event) =>
+                  updateDesign((current) =>
+                    withUpdatedTime({ ...current, darkBackground: event.target.value }),
+                  )
+                }
+              />
+            </label>
+            <div
+              className="proof-small"
+              style={{
+                '--small-proof-px': `${design.smallProofPx}px`,
+              } as CSSProperties}
+              data-testid="small-proof"
+            >
+              <span className="small-proof-center">
+                <span
+                  className="proof-artwork"
+                  dangerouslySetInnerHTML={{ __html: smallMarkup }}
                 />
-              </label>
-              <p className="microcopy">Font data stays on this device.</p>
-            </section>
-
-            <section>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Position</p>
-                  <h2>Glyphs</h2>
-                </div>
-              </div>
-              <div className="glyph-tabs" role="list" aria-label="Select a glyph">
-                {Array.from(design.text).map((character, index) => (
-                  <button
-                    key={`${character}-${index}`}
-                    className={selectedGlyph === index ? 'is-active' : ''}
-                    aria-pressed={selectedGlyph === index}
-                    onClick={() => setSelectedGlyph(index)}
-                  >
-                    {character === ' ' ? 'space' : character}
-                  </button>
-                ))}
-              </div>
-              {selected && (
-                <div className="coordinate-grid">
-                  <label>
-                    X
-                    <input
-                      aria-label={`${selectedCharacter} X position`}
-                      type="number"
-                      step="1"
-                      value={Math.round(selected.x * 100) / 100}
-                      onChange={(event) => {
-                        const x = Number(event.target.value)
-                        if (Number.isFinite(x)) {
-                          updateDesign((current) =>
-                            withUpdatedTime({
-                              ...current,
-                              glyphs: current.glyphs.map((glyph, index) =>
-                                index === selectedGlyph ? { ...glyph, x } : glyph,
-                              ),
-                            }),
-                          )
-                        }
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Y
-                    <input
-                      aria-label={`${selectedCharacter} Y position`}
-                      type="number"
-                      step="1"
-                      value={Math.round(selected.y * 100) / 100}
-                      onChange={(event) => {
-                        const y = Number(event.target.value)
-                        if (Number.isFinite(y)) {
-                          updateDesign((current) =>
-                            withUpdatedTime({
-                              ...current,
-                              glyphs: current.glyphs.map((glyph, index) =>
-                                index === selectedGlyph ? { ...glyph, y } : glyph,
-                              ),
-                            }),
-                          )
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="color-field">
-                    Base
-                    <input
-                      aria-label={`${selectedCharacter} base color`}
-                      type="color"
-                      value={selected.color}
-                      onChange={(event) => {
-                        const color = event.target.value
-                        updateDesign((current) =>
-                          withUpdatedTime({
-                            ...current,
-                            glyphs: current.glyphs.map((glyph, index) =>
-                              index === selectedGlyph ? { ...glyph, color } : glyph,
-                            ),
-                          }),
-                        )
-                      }}
-                    />
-                  </label>
-                </div>
-              )}
-            </section>
-
-            <section>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Exact intersections</p>
-                  <h2>Adjacent overlaps</h2>
-                </div>
-              </div>
-              <div className="pair-list">
-                {design.pairs.map((pair, index) => {
-                  const characters = Array.from(design.text)
-                  const left = characters[index] ?? ''
-                  const right = characters[index + 1] ?? ''
-                  const suggestion = suggestOverlapColor(
-                    design.glyphs[index]?.color ?? '#000000',
-                    design.glyphs[index + 1]?.color ?? '#000000',
-                  )
-                  return (
-                    <div className="pair-row" key={`${left}-${right}-${index}`}>
-                      <div>
-                        <strong>{left}–{right}</strong>
-                        <span>{Math.round(horizontalOverlap(design, font, index))} units</span>
-                      </div>
-                      <input
-                        aria-label={`${left} ${right} overlap color`}
-                        type="color"
-                        value={pair.color}
-                        onChange={(event) => {
-                          const color = event.target.value
-                          updateDesign((current) =>
-                            withUpdatedTime({
-                              ...current,
-                              pairs: current.pairs.map((candidate, pairIndex) =>
-                                pairIndex === index ? { color } : candidate,
-                              ),
-                            }),
-                          )
-                        }}
-                      />
-                      <button
-                        className="suggest-button"
-                        style={{ '--suggestion': suggestion } as React.CSSProperties}
-                        onClick={() =>
-                          updateDesign((current) =>
-                            withUpdatedTime({
-                              ...current,
-                              pairs: current.pairs.map((candidate, pairIndex) =>
-                                pairIndex === index ? { color: suggestion } : candidate,
-                              ),
-                            }),
-                          )
-                        }
-                      >
-                        Suggest
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-
-            <section>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Context</p>
-                  <h2>Proof settings</h2>
-                </div>
-              </div>
-              <div className="coordinate-grid proof-settings">
-                <label className="color-field">
-                  Light
-                  <input
-                    aria-label="Light proof background"
-                    type="color"
-                    value={design.lightBackground}
-                    onChange={(event) =>
-                      updateDesign((current) =>
-                        withUpdatedTime({ ...current, lightBackground: event.target.value }),
-                      )
-                    }
-                  />
-                </label>
-                <label className="color-field">
-                  Dark
-                  <input
-                    aria-label="Dark proof background"
-                    type="color"
-                    value={design.darkBackground}
-                    onChange={(event) =>
-                      updateDesign((current) =>
-                        withUpdatedTime({ ...current, darkBackground: event.target.value }),
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  Small px
+                <label className="small-proof-size">
                   <input
                     aria-label="Small proof size"
                     type="number"
                     min="8"
-                    max="256"
-                    value={design.smallProofPx}
-                    onChange={(event) => {
-                      const smallProofPx = Math.min(256, Math.max(8, Number(event.target.value)))
+                    max="64"
+                    title="Small proof size, 8 to 64 pixels"
+                    value={smallProofDraft}
+                    onFocus={() => {
+                      smallProofEditStart.current = design.smallProofPx
+                      setIsSmallProofEditing(true)
+                    }}
+                    onChange={(event) => updateSmallProofDraft(event.target.value)}
+                    onBlur={commitSmallProofDraft}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        event.currentTarget.blur()
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        cancelSmallProofEdit()
+                      }
+                    }}
+                  />
+                  <span>px</span>
+                </label>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <aside className="inspector" aria-label="Properties">
+          <div className="overlap-actions">
+            <div className="overlap-action-buttons">
+              <button onClick={recalculate} disabled={isBusy}>Recalculate</button>
+              <button
+                onClick={normalizeCoordinates}
+                disabled={isBusy}
+                aria-label="Normalize coordinates"
+                title="Normalize coordinates by moving the composition origin to its painted top-left without changing relative placement"
+              >
+                Normalize
+              </button>
+            </div>
+            {design.overlapsStale
+              ? <span role="status">Stale</span>
+              : geometryFeedback && <span role="status">{geometryFeedback}</span>}
+          </div>
+
+          {selected && (
+            <div className="coordinate-grid">
+              <label>
+                X
+                <input
+                  aria-label={`${glyphLabel(selectedCharacter)} X position`}
+                  type="number"
+                  step="1"
+                  value={Math.round(selected.x * 100) / 100}
+                  onChange={(event) => {
+                    const x = Number(event.target.value)
+                    if (Number.isFinite(x)) {
                       updateDesign((current) =>
-                        withUpdatedTime({ ...current, smallProofPx }),
+                        withUpdatedTime({
+                          ...current,
+                          overlapsStale: true,
+                          glyphs: current.glyphs.map((glyph, index) =>
+                            index === selectedGlyph ? { ...glyph, x } : glyph,
+                          ),
+                        }),
+                      )
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                Y
+                <input
+                  aria-label={`${glyphLabel(selectedCharacter)} Y position`}
+                  type="number"
+                  step="1"
+                  value={Math.round(selected.y * 100) / 100}
+                  onChange={(event) => {
+                    const y = Number(event.target.value)
+                    if (Number.isFinite(y)) {
+                      updateDesign((current) =>
+                        withUpdatedTime({
+                          ...current,
+                          overlapsStale: true,
+                          glyphs: current.glyphs.map((glyph, index) =>
+                            index === selectedGlyph ? { ...glyph, y } : glyph,
+                          ),
+                        }),
+                      )
+                    }
+                  }}
+                />
+              </label>
+              <label className="color-field">
+                Base
+                <input
+                  aria-label={`${glyphLabel(selectedCharacter)} base color`}
+                  type="color"
+                  value={selected.color}
+                  onChange={(event) => {
+                    const color = event.target.value
+                    updateDesign((current) =>
+                      refreshMixedOverlapColors(withUpdatedTime({
+                        ...current,
+                        glyphs: current.glyphs.map((glyph, index) =>
+                          index === selectedGlyph ? { ...glyph, color } : glyph,
+                        ),
+                      })),
+                    )
+                  }}
+                />
+              </label>
+              <button
+                className="following-toggle"
+                aria-label="Move selected glyph and following glyphs together"
+                aria-pressed={moveMode === 'following'}
+                title="Move selected glyph and following glyphs together"
+                onClick={() =>
+                  setMoveMode((current) => current === 'following' ? 'single' : 'following')
+                }
+              >
+                <svg className="chain-link-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          <div className="pair-list" data-testid="properties-inspector">
+            {design.overlaps.map((overlap, index) => {
+              const labels = overlap.glyphIndices.map((glyphIndex) =>
+                glyphLabel(characters[glyphIndex] ?? ''),
+              )
+              return (
+                <div
+                  className={`pair-row${
+                    selectedGlyph !== null && overlap.glyphIndices.includes(selectedGlyph)
+                      ? ' is-related'
+                      : ''
+                  }`}
+                  key={overlap.glyphIndices.join('-')}
+                >
+                  <div>
+                    <strong>{labels.join('–')}</strong>
+                    <span>
+                      {overlap.coverage < 0.1 ? '<0.1' : overlap.coverage.toFixed(1)}%
+                    </span>
+                  </div>
+                  <input
+                    aria-label={`${labels.join(' ')} overlap color`}
+                    type="color"
+                    value={overlap.color}
+                    onChange={(event) => {
+                      const color = event.target.value
+                      updateDesign((current) =>
+                        withUpdatedTime({
+                          ...current,
+                          overlaps: current.overlaps.map((candidate, overlapIndex) =>
+                            overlapIndex === index
+                              ? { ...candidate, color, colorMode: 'custom' }
+                              : candidate,
+                          ),
+                        }),
                       )
                     }}
                   />
-                </label>
-              </div>
-            </section>
-
-            <section>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Take it with you</p>
-                  <h2>Export</h2>
+                  <button
+                    className="mix-button"
+                    aria-pressed={overlap.colorMode === 'mixed'}
+                    onClick={() =>
+                      updateDesign((current) =>
+                        refreshMixedOverlapColors(withUpdatedTime({
+                          ...current,
+                          overlaps: current.overlaps.map((candidate, overlapIndex) =>
+                            overlapIndex === index
+                              ? { ...candidate, colorMode: 'mixed' }
+                              : candidate,
+                          ),
+                        })),
+                      )
+                    }
+                  >
+                    Mix
+                  </button>
                 </div>
-              </div>
-              <div className="export-actions">
-                <button className="primary" onClick={() => downloadSvg(design, font)}>
-                  Transparent SVG
-                </button>
-                <button
-                  onClick={() => {
-                    void downloadPng(design, font).catch((caught: unknown) => {
-                      setError(caught instanceof Error ? caught.message : 'PNG export failed.')
-                    })
-                  }}
-                >
-                  High-res PNG
-                </button>
-                <button onClick={() => downloadDesign(design, selectedStoredFont)}>
-                  Design JSON
-                </button>
-                <label className="file-button subtle">
-                  Import JSON
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    disabled={isBusy}
-                    onChange={(event) => void importDesign(event)}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <div className="status-area">
-              {error && <p className="error-message" role="alert">{error}</p>}
-              <p className="save-status" role="status" aria-live="polite">{status}</p>
-            </div>
-          </aside>
-        </div>
+              )
+            })}
+          </div>
+        </aside>
       </main>
-
-      <footer>
-        <p>Logo Lab · Open source under MIT</p>
-        <p>Bundled fonts are licensed under SIL OFL 1.1.</p>
-      </footer>
     </div>
   )
 }

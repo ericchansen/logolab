@@ -39,7 +39,10 @@ export async function downloadPng(
   font: FontRuntime,
 ): Promise<void> {
   const bounds = getDesignBounds(design, font)
-  const maxSide = 4096
+  const maxSide = design.pngLongestSide
+  if (!Number.isInteger(maxSide) || maxSide < 64 || maxSide > 8192) {
+    throw new Error('PNG longest side must be between 64 and 8192 pixels.')
+  }
   const scale = maxSide / Math.max(bounds.width, bounds.height)
   const width = Math.max(1, Math.round(bounds.width * scale))
   const height = Math.max(1, Math.round(bounds.height * scale))
@@ -49,6 +52,9 @@ export async function downloadPng(
   image.src = url
   await image.decode()
   const canvas = document.createElement('canvas')
+  if (width * height > 67_108_864) {
+    throw new Error('This PNG is too large for a reliable browser export.')
+  }
   canvas.width = width
   canvas.height = height
   const context = canvas.getContext('2d')
@@ -76,7 +82,7 @@ export function downloadDesign(
 ): void {
   const payload: PortableDesign = {
     kind: 'logo-lab-design',
-    schemaVersion: 1,
+    schemaVersion: 2,
     design,
     ...(storedFont ? { font: storedFont } : {}),
   }

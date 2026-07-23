@@ -1,4 +1,4 @@
-import { parse, type Font, type Glyph } from 'opentype.js'
+import { parse, type Font, type Glyph, type PathCommand } from 'opentype.js'
 import type {
   FontRuntime,
   FontSpec,
@@ -7,6 +7,7 @@ import type {
 } from './types'
 
 const OUTLINE_SIZE = 1000
+const FLATTENING_TOLERANCE = 0.5
 
 interface VariationManager {
   set(coordinates: Record<string, number>): void
@@ -21,30 +22,215 @@ interface VariableFont extends Font {
 
 export const BUILT_IN_FONTS: FontSpec[] = [
   {
-    id: 'sora-extrabold',
-    name: 'Sora ExtraBold',
+    id: 'archivo-black',
+    name: 'Archivo',
     source: 'builtin',
-    url: '/fonts/Sora-Variable.ttf',
+    url: 'fonts/Archivo-Black.ttf',
+    previewFamily: 'Logo Lab Archivo',
+  },
+  {
+    id: 'bricolage-grotesque-extrabold',
+    name: 'Bricolage Grotesque',
+    source: 'builtin',
+    url: 'fonts/BricolageGrotesque-ExtraBold.ttf',
+    previewFamily: 'Logo Lab Bricolage Grotesque',
   },
   {
     id: 'figtree-extrabold',
-    name: 'Figtree ExtraBold',
+    name: 'Figtree',
     source: 'builtin',
-    url: '/fonts/Figtree-Variable.ttf',
+    url: 'fonts/Figtree-Black.ttf',
+    previewFamily: 'Logo Lab Figtree',
   },
   {
-    id: 'work-sans-extrabold',
-    name: 'Work Sans ExtraBold',
+    id: 'fraunces-black',
+    name: 'Fraunces',
     source: 'builtin',
-    url: '/fonts/WorkSans-Variable.ttf',
+    url: 'fonts/Fraunces144pt-Black.ttf',
+    previewFamily: 'Logo Lab Fraunces',
+  },
+  {
+    id: 'manrope-extrabold',
+    name: 'Manrope',
+    source: 'builtin',
+    url: 'fonts/Manrope-ExtraBold.ttf',
+    previewFamily: 'Logo Lab Manrope',
+  },
+  {
+    id: 'plus-jakarta-sans-extrabold',
+    name: 'Plus Jakarta Sans',
+    source: 'builtin',
+    url: 'fonts/PlusJakartaSans-ExtraBold.ttf',
+    previewFamily: 'Logo Lab Plus Jakarta Sans',
   },
   {
     id: 'rubik-extrabold',
-    name: 'Rubik ExtraBold',
+    name: 'Rubik',
     source: 'builtin',
-    url: '/fonts/Rubik-Variable.ttf',
+    url: 'fonts/Rubik-Black.ttf',
+    previewFamily: 'Logo Lab Rubik',
+  },
+  {
+    id: 'sora-extrabold',
+    name: 'Sora',
+    source: 'builtin',
+    url: 'fonts/Sora-ExtraBold.ttf',
+    previewFamily: 'Logo Lab Sora',
+  },
+  {
+    id: 'space-grotesk-bold',
+    name: 'Space Grotesk',
+    source: 'builtin',
+    url: 'fonts/SpaceGrotesk-Bold.ttf',
+    previewFamily: 'Logo Lab Space Grotesk',
+  },
+  {
+    id: 'syne-extrabold',
+    name: 'Syne',
+    source: 'builtin',
+    url: 'fonts/Syne-ExtraBold.ttf',
+    previewFamily: 'Logo Lab Syne',
+  },
+  {
+    id: 'unbounded-black',
+    name: 'Unbounded',
+    source: 'builtin',
+    url: 'fonts/Unbounded-Black.ttf',
+    previewFamily: 'Logo Lab Unbounded',
+  },
+  {
+    id: 'work-sans-extrabold',
+    name: 'Work Sans',
+    source: 'builtin',
+    url: 'fonts/WorkSans-Black.ttf',
+    previewFamily: 'Logo Lab Work Sans',
   },
 ]
+
+export const DEFAULT_FONT_ID = 'rubik-extrabold'
+
+export function builtInFontUrl(spec: FontSpec): string {
+  if (!spec.url) {
+    throw new Error(`Built-in font ${spec.name} has no URL.`)
+  }
+  return `${import.meta.env.BASE_URL}${spec.url}`
+}
+
+function pointLineDistance(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): number {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y)
+  }
+  return Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x) /
+    Math.hypot(dx, dy)
+}
+
+function flattenQuadratic(
+  start: { x: number; y: number },
+  control: { x: number; y: number },
+  end: { x: number; y: number },
+  points: Array<{ x: number; y: number }>,
+): void {
+  if (pointLineDistance(control, start, end) <= FLATTENING_TOLERANCE) {
+    points.push(end)
+    return
+  }
+  const startControl = { x: (start.x + control.x) / 2, y: (start.y + control.y) / 2 }
+  const controlEnd = { x: (control.x + end.x) / 2, y: (control.y + end.y) / 2 }
+  const midpoint = {
+    x: (startControl.x + controlEnd.x) / 2,
+    y: (startControl.y + controlEnd.y) / 2,
+  }
+  flattenQuadratic(start, startControl, midpoint, points)
+  flattenQuadratic(midpoint, controlEnd, end, points)
+}
+
+function flattenCubic(
+  start: { x: number; y: number },
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+  end: { x: number; y: number },
+  points: Array<{ x: number; y: number }>,
+): void {
+  if (
+    Math.max(
+      pointLineDistance(first, start, end),
+      pointLineDistance(second, start, end),
+    ) <= FLATTENING_TOLERANCE
+  ) {
+    points.push(end)
+    return
+  }
+  const startFirst = { x: (start.x + first.x) / 2, y: (start.y + first.y) / 2 }
+  const firstSecond = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+  const secondEnd = { x: (second.x + end.x) / 2, y: (second.y + end.y) / 2 }
+  const leftControl = {
+    x: (startFirst.x + firstSecond.x) / 2,
+    y: (startFirst.y + firstSecond.y) / 2,
+  }
+  const rightControl = {
+    x: (firstSecond.x + secondEnd.x) / 2,
+    y: (firstSecond.y + secondEnd.y) / 2,
+  }
+  const midpoint = {
+    x: (leftControl.x + rightControl.x) / 2,
+    y: (leftControl.y + rightControl.y) / 2,
+  }
+  flattenCubic(start, startFirst, leftControl, midpoint, points)
+  flattenCubic(midpoint, rightControl, secondEnd, end, points)
+}
+
+export function flattenPathCommands(commands: PathCommand[]): Array<Array<{ x: number; y: number }>> {
+  const contours: Array<Array<{ x: number; y: number }>> = []
+  let contour: Array<{ x: number; y: number }> = []
+  let current = { x: 0, y: 0 }
+  let start = current
+  const finish = () => {
+    if (contour.length >= 3) {
+      const last = contour.at(-1)
+      if (last && (last.x !== start.x || last.y !== start.y)) {
+        contour.push(start)
+      }
+      contours.push(contour)
+    }
+    contour = []
+  }
+  for (const command of commands) {
+    if (command.type === 'M') {
+      finish()
+      current = { x: command.x, y: command.y }
+      start = current
+      contour.push(current)
+    } else if (command.type === 'L') {
+      current = { x: command.x, y: command.y }
+      contour.push(current)
+    } else if (command.type === 'Q') {
+      const end = { x: command.x, y: command.y }
+      flattenQuadratic(current, { x: command.x1, y: command.y1 }, end, contour)
+      current = end
+    } else if (command.type === 'C') {
+      const end = { x: command.x, y: command.y }
+      flattenCubic(
+        current,
+        { x: command.x1, y: command.y1 },
+        { x: command.x2, y: command.y2 },
+        end,
+        contour,
+      )
+      current = end
+    } else {
+      finish()
+      current = start
+    }
+  }
+  finish()
+  return contours
+}
 
 function toOutline(font: VariableFont, character: string): GlyphOutline {
   const sourceGlyph = font.charToGlyph(character)
@@ -54,20 +240,29 @@ function toOutline(font: VariableFont, character: string): GlyphOutline {
 
   const glyph = font.variation?.process.getTransform(sourceGlyph) ?? sourceGlyph
   const scale = OUTLINE_SIZE / font.unitsPerEm
-  const box = glyph.getBoundingBox()
-  const path = glyph.getPath(0, 0, OUTLINE_SIZE).toPathData(3)
+  const glyphPath = glyph.getPath(0, 0, OUTLINE_SIZE)
+  const box = glyphPath.getBoundingBox()
+  const path = glyphPath.toPathData(3)
+  const bounds = {
+    x1: box.x1,
+    y1: box.y1,
+    x2: box.x2,
+    y2: box.y2,
+  }
+  if (
+    Object.values(bounds).some((value) => !Number.isFinite(value) || Math.abs(value) > 20_000) ||
+    (path && (bounds.x2 <= bounds.x1 || bounds.y2 <= bounds.y1))
+  ) {
+    throw new Error(`The outline for “${character}” in ${font.getEnglishName('fontFamily')} is malformed.`)
+  }
 
   return {
     character,
     glyphIndex: glyph.index,
     path,
     advance: (glyph.advanceWidth ?? font.unitsPerEm) * scale,
-    bounds: {
-      x1: box.x1 * scale,
-      y1: -box.y2 * scale,
-      x2: box.x2 * scale,
-      y2: -box.y1 * scale,
-    },
+    bounds,
+    contours: flattenPathCommands(glyphPath.commands),
   }
 }
 
@@ -90,10 +285,7 @@ export async function loadBuiltInFont(
   spec: FontSpec,
   text: string,
 ): Promise<FontRuntime> {
-  if (!spec.url) {
-    throw new Error(`Built-in font ${spec.name} has no URL.`)
-  }
-  const response = await fetch(spec.url)
+  const response = await fetch(builtInFontUrl(spec))
   if (!response.ok) {
     throw new Error(`Could not load ${spec.name}.`)
   }

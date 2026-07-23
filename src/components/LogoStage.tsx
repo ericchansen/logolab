@@ -20,9 +20,10 @@ interface LogoStageProps {
   font: FontRuntime
   viewBox: Rect
   background: string
-  selectedGlyph: number
+  selectedGlyph: number | null
   moveMode: MoveMode
   onSelect: (index: number) => void
+  onClearSelection: () => void
   onMove: (index: number, delta: Point, mode: MoveMode) => void
   onViewBoxChange: (viewBox: Rect) => void
 }
@@ -59,6 +60,7 @@ export function LogoStage({
   selectedGlyph,
   moveMode,
   onSelect,
+  onClearSelection,
   onMove,
   onViewBoxChange,
 }: LogoStageProps) {
@@ -78,13 +80,13 @@ export function LogoStage({
   )
 
   function beginDrag(event: PointerEvent<HTMLDivElement>) {
-    const point = clientToSvg(event.currentTarget, event.clientX, event.clientY)
     const hit =
       event.target instanceof Element
         ? event.target.closest<SVGPathElement>('[data-glyph-hit]')
         : null
     const hitIndex = Number(hit?.dataset.glyphHit)
     if (hit && Number.isInteger(hitIndex) && event.button === 0 && !spacePressed) {
+      const point = clientToSvg(event.currentTarget, event.clientX, event.clientY)
       onSelect(hitIndex)
       drag.current = { kind: 'glyph', index: hitIndex, previous: point }
     } else if (spacePressed || event.button === 1) {
@@ -94,6 +96,9 @@ export function LogoStage({
         startClient: { x: event.clientX, y: event.clientY },
         startViewBox: { ...viewBox },
       }
+    } else if (event.button === 0) {
+      onClearSelection()
+      return
     } else {
       return
     }
@@ -138,6 +143,11 @@ export function LogoStage({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClearSelection()
+      return
+    }
     if (event.code === 'Space') {
       event.preventDefault()
       setSpacePressed(true)
@@ -151,7 +161,7 @@ export function LogoStage({
       ArrowDown: { x: 0, y: step },
     }
     const delta = deltas[event.key]
-    if (delta) {
+    if (delta && selectedGlyph !== null) {
       event.preventDefault()
       onMove(selectedGlyph, delta, moveMode)
     }
@@ -177,7 +187,7 @@ export function LogoStage({
       className={`editor-stage${spacePressed ? ' is-panning' : ''}`}
       style={{ background }}
       role="application"
-      aria-label="Interactive logo proof. Drag a letter to move it. Hold Space and drag to pan. Use arrow keys to nudge the selected letter."
+      aria-label="Interactive logo proof. Drag a letter to move it. Click empty space or press Escape to clear the selection. Hold Space and drag to pan. Use arrow keys to nudge the selected letter."
       tabIndex={0}
       data-testid="editor-stage"
       onPointerDown={beginDrag}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { designStorageKey, loadDesign, saveDesign } from './persistence'
+import {
+  designStorageKey,
+  loadDesign,
+  removeDesignsForFont,
+  saveDesign,
+  trySaveDesign,
+} from './persistence'
 import type { DesignDocument } from './types'
 
 class MemoryStorage implements Storage {
@@ -32,7 +38,7 @@ class MemoryStorage implements Storage {
 
 function design(fontId: string, text: string, x: number): DesignDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     fontId,
     fontName: fontId,
     text,
@@ -41,10 +47,12 @@ function design(fontId: string, text: string, x: number): DesignDocument {
       y: 0,
       color: '#112233',
     })),
-    pairs: Array.from({ length: text.length - 1 }, () => ({ color: '#445566' })),
+    overlaps: [],
+    overlapsStale: false,
     lightBackground: '#FFFFFF',
     darkBackground: '#111111',
     smallProofPx: 32,
+    pngLongestSide: 4096,
     updatedAt: '2026-07-22T00:00:00.000Z',
   }
 }
@@ -79,5 +87,57 @@ describe('design persistence isolation', () => {
     storage.setItem(key, '{"glyphs":"broken"}')
     expect(loadDesign('sora', 'Logo', storage)).toBeNull()
     expect(storage.getItem(key)).toBeNull()
+  })
+
+  it('removes every saved text variant for one font only', () => {
+    const storage = new MemoryStorage()
+    saveDesign(design('local-font', 'Logo', 1), storage)
+    saveDesign(design('local-font', 'Mark', 2), storage)
+    saveDesign(design('rubik', 'Logo', 3), storage)
+    removeDesignsForFont('local-font', storage)
+    expect(loadDesign('local-font', 'Logo', storage)).toBeNull()
+    expect(loadDesign('local-font', 'Mark', storage)).toBeNull()
+    expect(loadDesign('rubik', 'Logo', storage)?.glyphs[0]?.x).toBe(3)
+  })
+
+  it('reports quota failures without mutating the design', () => {
+    const source = design('rubik', 'Logo Lab', 314)
+    const storage = new MemoryStorage()
+    storage.setItem = () => {
+      throw new DOMException('Storage quota exceeded.', 'QuotaExceededError')
+    }
+
+    const result = trySaveDesign(source, storage)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.name).toBe('QuotaExceededError')
+    }
+    expect(source.glyphs[0]?.x).toBe(314)
+    expect(storage.length).toBe(0)
+  })
+
+  it('contains failures raised while browser storage is being resolved', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new DOMException('Storage is blocked.', 'SecurityError')
+      },
+    })
+    try {
+      const result = trySaveDesign(design('rubik', 'Logo Lab', 314))
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.name).toBe('SecurityError')
+      }
+      expect(loadDesign('rubik', 'Logo Lab')).toBeNull()
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, 'localStorage', descriptor)
+      } else {
+        Reflect.deleteProperty(globalThis, 'localStorage')
+      }
+    }
   })
 })

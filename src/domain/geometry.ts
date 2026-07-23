@@ -8,6 +8,7 @@ import type {
 } from './types'
 
 const MIN_BOUNDS_SIZE = 1
+export const NORMALIZATION_TOLERANCE = 0.001
 
 export function pairRelativeOffset(left: Point, right: Point): Point {
   return {
@@ -46,6 +47,60 @@ export function getDesignBounds(
     return positionedBounds(outline.bounds, placement)
   })
 
+  return boundsRect(bounds)
+}
+
+export function getPaintedBounds(
+  design: DesignDocument,
+  font: FontRuntime,
+): Rect {
+  const bounds = font.outlines.flatMap((outline, index) => {
+    const placement = design.glyphs[index]
+    if (!placement) {
+      throw new Error(`Missing placement for glyph ${index}.`)
+    }
+    if (
+      outline.path.trim() === '' ||
+      outline.bounds.x2 <= outline.bounds.x1 ||
+      outline.bounds.y2 <= outline.bounds.y1
+    ) {
+      return []
+    }
+    return [positionedBounds(outline.bounds, placement)]
+  })
+
+  if (bounds.length === 0) {
+    return { x: 0, y: 0, width: MIN_BOUNDS_SIZE, height: MIN_BOUNDS_SIZE }
+  }
+
+  return boundsRect(bounds)
+}
+
+export function normalizeDesignCoordinates(
+  design: DesignDocument,
+  font: FontRuntime,
+): DesignDocument {
+  const bounds = getPaintedBounds(design, font)
+  if (
+    Math.abs(bounds.x) <= NORMALIZATION_TOLERANCE &&
+    Math.abs(bounds.y) <= NORMALIZATION_TOLERANCE
+  ) {
+    return design
+  }
+
+  return {
+    ...design,
+    glyphs: design.glyphs.map((glyph) => ({
+      ...glyph,
+      x: glyph.x - bounds.x,
+      y: glyph.y - bounds.y,
+    })),
+    overlapsStale: true,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function boundsRect(bounds: GlyphBounds[]): Rect {
   const x1 = Math.min(...bounds.map((box) => box.x1))
   const y1 = Math.min(...bounds.map((box) => box.y1))
   const x2 = Math.max(...bounds.map((box) => box.x2))
@@ -82,6 +137,7 @@ export function moveGlyphs(
         ? { ...glyph, x: glyph.x + delta.x, y: glyph.y + delta.y }
         : glyph
     }),
+    overlapsStale: true,
     updatedAt: new Date().toISOString(),
   }
 }
