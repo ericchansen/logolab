@@ -4,7 +4,8 @@ import type { DesignDocument, FontRuntime, Rect } from './types'
 export interface SvgOptions {
   renderId: string
   viewBox?: Rect
-  selectedGlyph?: number | null
+  selectedGlyphs?: readonly number[]
+  primaryGlyph?: number | null
   interactive?: boolean
   className?: string
 }
@@ -31,6 +32,7 @@ export function buildSvgMarkup(
   }
   const bounds = options.viewBox ?? getDesignBounds(design, font)
   const prefix = options.renderId.replace(/[^a-zA-Z0-9_-]/g, '-')
+  const selectedGlyphs = new Set(options.selectedGlyphs)
   const orderedOverlaps = [...design.overlaps].sort(
     (left, right) =>
       left.glyphIndices.length - right.glyphIndices.length ||
@@ -89,12 +91,13 @@ export function buildSvgMarkup(
           if (!glyph) {
             return ''
           }
-          const selected = options.selectedGlyph === index
+          const selected = selectedGlyphs.has(index)
+          const primary = options.primaryGlyph === index
           const transform = `translate(${formatNumber(glyph.x)} ${formatNumber(glyph.y)})`
           const halo = selected
             ? `<path d="${escapeAttribute(outline.path)}" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" vector-effect="non-scaling-stroke" transform="${transform}" data-selection-halo="${index}" pointer-events="none"/>`
             : ''
-          return `${halo}<path d="${escapeAttribute(outline.path)}" fill="transparent" stroke="${selected ? '#2563eb' : 'transparent'}" stroke-width="${selected ? '1.5' : '0'}" stroke-linejoin="round" vector-effect="non-scaling-stroke" transform="${transform}" data-glyph-hit="${index}" data-selected="${selected}" tabindex="-1"/>`
+          return `${halo}<path d="${escapeAttribute(outline.path)}" fill="transparent" stroke="${selected ? '#2563eb' : 'transparent'}" stroke-width="${primary ? '2' : selected ? '1.5' : '0'}" stroke-linejoin="round" vector-effect="non-scaling-stroke" transform="${transform}" data-glyph-hit="${index}" data-selected="${selected}" data-primary="${primary}" tabindex="-1"/>`
         })
         .join('')
     : ''

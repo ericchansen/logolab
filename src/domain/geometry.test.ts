@@ -102,20 +102,26 @@ describe('pair-relative clipping geometry', () => {
     expect(svg).toContain('data-overlap="0-1-2"')
   })
 
-  it('moves one glyph or following glyphs and marks overlaps stale', () => {
+  it('moves the selected glyphs and marks overlaps stale', () => {
     const source: DesignDocument = {
       ...document(),
       text: 'ABC',
       glyphs: [...document().glyphs, { x: 900, y: 0, color: '#778899' }],
     }
-    const single = moveGlyphs(source, 1, { x: 10, y: -5 }, 'single')
+    const single = moveGlyphs(source, [1], { x: 10, y: -5 })
     expect(single.glyphs.map(({ x, y }) => ({ x, y }))).toEqual([
       { x: 125, y: 40 },
       { x: 485, y: -40 },
       { x: 900, y: 0 },
     ])
     expect(single.overlapsStale).toBe(true)
-    const following = moveGlyphs(source, 1, { x: 10, y: -5 }, 'following')
+    const group = moveGlyphs(source, [0, 2], { x: 10, y: -5 })
+    expect(group.glyphs.map(({ x, y }) => ({ x, y }))).toEqual([
+      { x: 135, y: 35 },
+      { x: 475, y: -35 },
+      { x: 910, y: -5 },
+    ])
+    const following = moveGlyphs(source, [1, 2], { x: 10, y: -5 })
     expect(following.glyphs.map(({ x, y }) => ({ x, y }))).toEqual([
       { x: 125, y: 40 },
       { x: 485, y: -40 },
@@ -204,7 +210,7 @@ describe('pair-relative clipping geometry', () => {
     })
   })
 
-  it('normalizes painted bounds with one idempotent translation', () => {
+  it('normalizes an anchor glyph to zero with one idempotent translation', () => {
     const empty = {
       ...outline(' ', 500),
       path: '',
@@ -242,27 +248,28 @@ describe('pair-relative clipping geometry', () => {
     const beforeOverlaps = beforeAccurate.overlaps
     const beforeSvg = buildSvgMarkup(beforeAccurate, font, { renderId: 'before-normalize' })
 
-    const normalized = normalizeDesignCoordinates(source, font)
+    const normalized = normalizeDesignCoordinates(source, 1)
     const translations = normalized.glyphs.map((glyph, index) => ({
       x: glyph.x - source.glyphs[index]!.x,
       y: glyph.y - source.glyphs[index]!.y,
     }))
 
     expect(translations).toEqual([
-      { x: -495, y: 765 },
-      { x: -495, y: 765 },
-      { x: -495, y: 765 },
+      { x: -375, y: 85 },
+      { x: -375, y: 85 },
+      { x: -375, y: 85 },
     ])
+    expect(normalized.glyphs[1]).toMatchObject({ x: 0, y: 0 })
     expect(getPaintedBounds(normalized, font)).toEqual({
-      x: 0,
-      y: 0,
+      x: 120,
+      y: -680,
       width: 905,
       height: 725,
     })
     expect(pairRelativeOffset(normalized.glyphs[1]!, normalized.glyphs[2]!))
       .toEqual(beforeDelta)
     expect(recalculateOverlaps(normalized, font).overlaps).toEqual(beforeOverlaps)
-    expect(normalizeDesignCoordinates(normalized, font)).toBe(normalized)
+    expect(normalizeDesignCoordinates(normalized, 1)).toBe(normalized)
 
     const afterSvg = buildSvgMarkup(
       recalculateOverlaps(normalized, font),
@@ -270,12 +277,11 @@ describe('pair-relative clipping geometry', () => {
       { renderId: 'after-normalize' },
     )
     expect(beforeSvg).toContain('viewBox="-2400 -765 3800 1665"')
-    expect(afterSvg).toContain('viewBox="-2895 0 3800 1665"')
+    expect(afterSvg).toContain('viewBox="-2775 -680 3800 1665"')
     expect(beforeSvg).toContain('transform="translate(325 45)"')
     expect(afterSvg).toContain('transform="translate(325 45)"')
-    expect(afterSvg).toContain('transform="translate(-2895 1665)"')
-    expect(afterSvg).toContain('transform="translate(-120 680)"')
-    expect(afterSvg).toContain('transform="translate(205 725)"')
+    expect(afterSvg).toContain('transform="translate(-2775 985)"')
+    expect(afterSvg).toContain('transform="translate(0 0)"')
   })
 })
 

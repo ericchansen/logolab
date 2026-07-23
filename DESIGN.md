@@ -48,9 +48,12 @@ rather than uppercase labels.
 
 ## States
 
-- Glyph layers use concise weight and a small circular marker when selected, never a tinted slab
-  or inset stripe.
-- The selected outline is a thin cobalt and white vector halo; deselection removes it fully.
+- Glyph layers are an accessible multi-select list. Selected layers use concise weight and a small
+  circular marker, with a stronger marker for the primary layer, never a tinted slab or inset stripe.
+- Selected outlines use a thin cobalt and white vector halo; the primary outline is slightly stronger.
+  Deselecting removes outlines fully.
+- X/Y display the primary glyph and move every selected glyph by the resulting delta. The chain action
+  visibly selects the primary glyph and every glyph after it instead of enabling a hidden move mode.
 - Position changes keep the current overlap paint visible and show `Stale`.
 - Recalculate refreshes identities, coverage, and mixed colors.
 - Overlap rows show glyph identity, coverage, explicit swatch, and mixed/custom mode.
@@ -66,15 +69,16 @@ moves either artboard. Each artboard is itself the background color target; the 
 renders centered from its painted outline bounds, with its compact pixel control beside it but
 outside that centering calculation. Main and proof framing ignores advance width, side bearings, and
 empty glyphs without changing design coordinates or export geometry. Normalize is the separate,
-explicit model action: it translates every glyph by one painted-bounds offset and refreshes overlap
-geometry. Export exposes SVG, PNG presets or custom longest side, and portable JSON. Every export
-flushes live text and refreshes stale overlap geometry.
+explicit model action: it translates every glyph by one offset so the primary glyph becomes `0,0`,
+then refreshes overlap geometry. Export exposes SVG, PNG presets or custom longest side, and portable
+JSON in a light-dismiss popover. Every export flushes live text and refreshes stale overlap geometry.
 
 ## Motion and access
 
 Use 150-220 ms ease-out feedback for border, color, and small transforms only. Disable motion
-under `prefers-reduced-motion`. Keep 3 px visible focus rings, semantic names, non-color state
-cues, keyboard nudging, Escape deselection, and minimum 30 px targets.
+under `prefers-reduced-motion`. Keep 3 px visible focus rings, semantic names, non-color state cues,
+roving layer-list focus, continuous keyboard nudging, Escape deselection, light-dismiss popovers,
+and minimum 30 px targets.
 
 ## Responsive behavior
 

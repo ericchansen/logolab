@@ -88,19 +88,26 @@ async function setSelectedX(page: Page, value: number) {
   await input.blur()
 }
 
+function translatePosition(value: string | null) {
+  const match = value?.match(/^translate\((-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)\)$/)
+  if (!match) {
+    throw new Error(`Unexpected glyph transform: ${value}`)
+  }
+  return { x: Number(match[1]), y: Number(match[2]) }
+}
+
 async function downloadSvg(page: Page): Promise<string> {
-  const menu = page.locator('.export-menu')
-  if (!(await menu.evaluate((element) => element.hasAttribute('open')))) {
-    await menu.locator('summary').click()
+  const trigger = page.getByRole('button', { name: 'Export', exact: true })
+  const popover = page.locator('#export-popover')
+  if (!(await popover.isVisible())) {
+    await trigger.click()
   }
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'SVG', exact: true }).click()
   const download = await downloadPromise
   const filePath = await download.path()
   expect(filePath).not.toBeNull()
-  if (await menu.evaluate((element) => element.hasAttribute('open'))) {
-    await menu.locator('summary').click()
-  }
+  await expect(popover).toBeHidden()
   return readFile(filePath ?? '', 'utf8')
 }
 
@@ -222,7 +229,7 @@ test('opens directly on the captured Rubik Logo Lab preset at desktop and narrow
       inspectorBackground: style('.inspector').backgroundColor,
       coordinateBorder: style('.coordinate-grid').borderBottomWidth,
       glyphBorder: style('.glyph-tabs button').borderBottomWidth,
-      glyphSelectionBackground: style('.glyph-tabs button.is-active').backgroundColor,
+      glyphSelectionBackground: style('.glyph-tabs button.is-selected').backgroundColor,
       pairBorder: style('.pair-row').borderBottomWidth,
       pairBackground: style('.pair-row').backgroundColor,
       canvasBorder: style('.editor-stage').borderWidth,
@@ -296,13 +303,12 @@ test('uses direct, accessible controls without redundant chrome', async ({ page 
   await expect(page.locator('.font-picker')).not.toHaveAttribute('open', '')
 
   const linkedMove = page.getByRole('button', {
-    name: 'Move selected glyph and following glyphs together',
+    name: 'Select L and following glyphs',
     exact: true,
   })
-  await expect(linkedMove).toHaveAttribute('aria-pressed', 'false')
   await expect(linkedMove).toHaveAttribute(
     'title',
-    'Move selected glyph and following glyphs together',
+    'Select L and following glyphs',
   )
   const chainLink = linkedMove.locator('svg.chain-link-icon')
   await expect(chainLink).toHaveCount(1)
@@ -414,7 +420,7 @@ test('uses direct, accessible controls without redundant chrome', async ({ page 
     second: await secondGlyph.getAttribute('transform'),
   }
   await linkedMove.click()
-  await expect(linkedMove).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.glyph-tabs [role="option"][aria-selected="true"]')).toHaveCount(8)
   await stage.focus()
   await page.keyboard.press('ArrowRight')
   const linked = {
@@ -424,12 +430,129 @@ test('uses direct, accessible controls without redundant chrome', async ({ page 
   expect(linked.first).not.toBe(before.first)
   expect(linked.second).not.toBe(before.second)
 
-  await linkedMove.click()
-  await expect(linkedMove).toHaveAttribute('aria-pressed', 'false')
+  await selectGlyph(page, 0)
+  await expect(page.locator('.glyph-tabs [role="option"][aria-selected="true"]')).toHaveCount(1)
   await stage.focus()
   await page.keyboard.press('ArrowRight')
   expect(await firstGlyph.getAttribute('transform')).not.toBe(linked.first)
   expect(await secondGlyph.getAttribute('transform')).toBe(linked.second)
+})
+
+test('multi-selects letters and keeps group movement visible and precise', async ({ page }) => {
+  await setText(page, 'AB')
+  const layerList = page.getByRole('listbox', { name: 'Glyph layers' })
+  const options = layerList.getByRole('option')
+  await expect(layerList).toHaveAttribute('aria-multiselectable', 'true')
+  await options.nth(0).click()
+  await options.nth(1).click({ modifiers: ['Shift'] })
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(options.nth(0)).toHaveAttribute('aria-label', '01 A')
+  await expect(options.nth(1)).toHaveAttribute('aria-label', '02 B primary')
+
+  const stage = page.getByTestId('editor-stage')
+  await expect(stage.locator('[data-selected="true"]')).toHaveCount(2)
+  await expect(stage.locator('[data-primary="true"]')).toHaveAttribute('data-glyph-hit', '1')
+  const firstGlyph = stage.locator('[data-glyph="0"]')
+  const secondGlyph = stage.locator('[data-glyph="1"]')
+  const positions = async () => ({
+    first: translatePosition(await firstGlyph.getAttribute('transform')),
+    second: translatePosition(await secondGlyph.getAttribute('transform')),
+  })
+
+  const before = await positions()
+  await stage.focus()
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  const afterNudge = await positions()
+  expect(afterNudge.first.x - before.first.x).toBe(2)
+  expect(afterNudge.second.x - before.second.x).toBe(2)
+  await expect(page.getByLabel('B X position')).toHaveValue(String(afterNudge.second.x))
+
+  await page.getByLabel('B X position').fill(String(afterNudge.second.x + 10))
+  const afterCoordinate = await positions()
+  expect(afterCoordinate.first.x - afterNudge.first.x).toBe(10)
+  expect(afterCoordinate.second.x - afterNudge.second.x).toBe(10)
+
+  const hit = stage.locator('[data-glyph-hit="1"]')
+  const hitBox = await hit.boundingBox()
+  expect(hitBox).not.toBeNull()
+  const dragStart = {
+    x: (hitBox?.x ?? 0) + (hitBox?.width ?? 0) / 2,
+    y: (hitBox?.y ?? 0) + (hitBox?.height ?? 0) / 2,
+  }
+  const beforeDrag = await positions()
+  await page.mouse.move(dragStart.x, dragStart.y)
+  await page.mouse.down()
+  await page.mouse.move(dragStart.x + 24, dragStart.y + 6)
+  await page.mouse.up()
+  const afterDrag = await positions()
+  expect(afterDrag.first.x - beforeDrag.first.x).toBeCloseTo(
+    afterDrag.second.x - beforeDrag.second.x,
+    4,
+  )
+  expect(afterDrag.first.y - beforeDrag.first.y).toBeCloseTo(
+    afterDrag.second.y - beforeDrag.second.y,
+    4,
+  )
+  expect(afterDrag.second.x).not.toBe(beforeDrag.second.x)
+})
+
+test('uses roving keyboard focus for the glyph layer list', async ({ page }) => {
+  await setText(page, 'ABC')
+  const options = page.getByRole('listbox', { name: 'Glyph layers' }).getByRole('option')
+  await options.nth(0).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(options.nth(1)).toBeFocused()
+  await page.keyboard.press('Shift+Space')
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true')
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('End')
+  await expect(options.nth(2)).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'false')
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'false')
+  await expect(options.nth(2)).toHaveAttribute('aria-selected', 'true')
+})
+
+test('keeps selection and layer focus valid after importing a shorter design', async ({ page }) => {
+  await setText(page, 'A')
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Design JSON', exact: true }).click()
+  const download = await downloadPromise
+  const filePath = await download.path()
+  expect(filePath).not.toBeNull()
+  const importedDesign = await readFile(filePath ?? '')
+
+  await setText(page, 'ABC')
+  await selectGlyph(page, 2)
+  await page.getByLabel('Import JSON').setInputFiles({
+    name: 'shorter.logo-lab.json',
+    mimeType: 'application/json',
+    buffer: importedDesign,
+  })
+
+  await expect(page.getByLabel('Logo text', { exact: true })).toHaveValue('A')
+  const importedOption = page.getByRole('listbox', { name: 'Glyph layers' }).getByRole('option')
+  await expect(importedOption).toHaveCount(1)
+  await expect(importedOption).toHaveAttribute('aria-selected', 'true')
+  await expect(importedOption).toHaveAttribute('tabindex', '0')
+})
+
+test('light-dismisses the export popover and restores focus on Escape', async ({ page }) => {
+  const trigger = page.getByRole('button', { name: 'Export', exact: true })
+  const popover = page.locator('#export-popover')
+  await trigger.click()
+  await expect(popover).toBeVisible()
+  await page.getByTestId('editor-stage').click({ position: { x: 8, y: 8 } })
+  await expect(popover).toBeHidden()
+
+  await trigger.click()
+  await popover.getByRole('button', { name: 'SVG', exact: true }).focus()
+  await page.keyboard.press('Escape')
+  await expect(popover).toBeHidden()
+  await expect(trigger).toBeFocused()
 })
 
 test('edits the actual-size proof through normal number-field states', async ({ page }) => {
@@ -633,7 +756,7 @@ test('normalizes all coordinates once without changing the rendered composition'
   await expect(normalize).toHaveText('Normalize')
   await expect(normalize).toHaveAttribute(
     'title',
-    'Normalize coordinates by moving the composition origin to its painted top-left without changing relative placement',
+    'Set the selected glyph to 0,0 without changing relative placement',
   )
   await expect(page.locator('.overlap-action-buttons button')).toHaveText([
     'Recalculate',
@@ -672,11 +795,13 @@ test('normalizes all coordinates once without changing the rendered composition'
   const beforeSvg = await downloadSvg(page)
 
   await normalize.click()
-  await expect(page.getByText('Coordinates normalized.', { exact: true })).toBeVisible()
+  await expect(page.getByText('Coordinates normalized to 0,0.', { exact: true })).toBeVisible()
   await expect(page.locator('.glyph-tabs button').nth(2)).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true',
   )
+  await expect(inputs.nth(0)).toHaveValue('0')
+  await expect(inputs.nth(1)).toHaveValue('0')
   await expect(page.getByText('Stale', { exact: true })).toHaveCount(0)
 
   const after = await renderedState()
@@ -698,7 +823,14 @@ test('normalizes all coordinates once without changing the rendered composition'
       6,
     )
   }
-  expect(after.viewBox.split(/\s+/).slice(0, 2).map(Number)).toEqual([0, 0])
+  expect(after.viewBox.split(/\s+/).slice(0, 2).map(Number)).toEqual(
+    before.viewBox
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((value, index) => Number(value) + (index === 0
+        ? commonTranslation.x
+        : commonTranslation.y)),
+  )
   expect(after.clips).toEqual(before.clips)
   expect(after.overlaps).toEqual(before.overlaps)
   expect(await page.locator('.pair-row').allTextContents()).toEqual(beforePairRows)
@@ -731,9 +863,12 @@ test('normalizes all coordinates once without changing the rendered composition'
   const firstNormalizedState = await renderedState()
   await normalize.click()
   await expect(
-    page.getByText('Coordinates are already normalized.', { exact: true }),
+    page.getByText('Coordinates are already normalized to 0,0.', { exact: true }),
   ).toBeVisible()
   expect(await renderedState()).toEqual(firstNormalizedState)
+  await page.getByTestId('editor-stage').focus()
+  await page.keyboard.press('Escape')
+  await expect(normalize).toBeDisabled()
 
   for (const viewport of [
     { width: 1254, height: 964 },
@@ -853,7 +988,7 @@ test('blocks export while an explicit font switch is loading', async ({ page }) 
   await picker.locator('summary').click()
   await picker.getByRole('option', { name: 'Figtree', exact: true }).click()
   await fontRequestStarted
-  await page.locator('.export-menu summary').click()
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.getByRole('button', { name: 'SVG', exact: true }).click()
 
   await expect(page.getByRole('alert')).toContainText(
@@ -890,7 +1025,7 @@ test('cancels export without overwriting edits made while its font loads', async
   })
 
   await page.getByLabel('Text').fill('Atomic')
-  await page.locator('.export-menu summary').click()
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.getByRole('button', { name: 'SVG', exact: true }).click()
   await fontRequestStarted
   await page.getByLabel('Text').fill('Latest')
@@ -1021,7 +1156,7 @@ test('export recalculates stale overlaps and writes nested pair-relative SVG cli
   const editorViewBox = await page.getByTestId('editor-stage').locator('svg').getAttribute('viewBox')
 
   const downloadPromise = page.waitForEvent('download')
-  await page.locator('.export-menu summary').click()
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.getByRole('button', { name: 'SVG', exact: true }).click()
   const download = await downloadPromise
   const filePath = await download.path()
@@ -1121,6 +1256,23 @@ test('adds and confirms removal of a local font and its saved variants', async (
   expect(localKeys).toEqual([])
 })
 
+test('keeps selection and layer focus valid when a font upload uses shorter pending text', async ({
+  page,
+}) => {
+  await selectGlyph(page, 7)
+  await page.getByLabel('Logo text', { exact: true }).fill('A')
+  await page
+    .locator('input[type="file"][accept*=".ttf"]')
+    .setInputFiles(path.resolve('public/fonts/Figtree-Black.ttf'))
+
+  await expect(page.locator('.font-picker summary')).toContainText('Figtree')
+  await expect(page.getByLabel('Logo text', { exact: true })).toHaveValue('A')
+  const option = page.getByRole('listbox', { name: 'Glyph layers' }).getByRole('option')
+  await expect(option).toHaveCount(1)
+  await expect(option).toHaveAttribute('aria-selected', 'true')
+  await expect(option).toHaveAttribute('tabindex', '0')
+})
+
 test('keeps active work accessible without recreating variants if removal fallback fails', async ({
   page,
 }) => {
@@ -1149,7 +1301,7 @@ test('keeps active work accessible without recreating variants if removal fallba
 })
 
 test('supports PNG presets and a custom validated longest side', async ({ page }) => {
-  await page.locator('.export-menu summary').click()
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
   const preset = page.getByLabel('PNG longest side preset')
   await preset.selectOption('1024')
   await expect(preset).toHaveValue('1024')

@@ -99,5 +99,3 @@ export interface StoredFont {
   fileName: string
   dataUrl: string
 }
-
-export type MoveMode = 'single' | 'following'

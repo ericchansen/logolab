@@ -22,8 +22,8 @@ their branding. The interface disappears into the work; the artwork carries the 
 4. Prefer the object to its label. Interact with a proof to change its background; self-evident
    controls keep precise accessible names without permanent captions.
 5. Make accuracy explicit. Position edits mark overlap records stale; Recalculate is always
-   available; Normalize coordinates deliberately moves the composition origin from painted bounds;
-   export recalculates before writing.
+   available; Normalize coordinates moves the primary glyph to `0,0` while preserving relative
+   placement; export recalculates before writing.
 6. Keep local behavior quiet. Fonts, designs, and exports stay in the browser without privacy
    marketing or permanent save-success UI.
 
@@ -33,7 +33,12 @@ their branding. The interface disappears into the work; the artwork carries the 
 - Built-in and local fonts use real OpenType outlines without reconstruction or distortion.
 - Overlap identity is a sorted set of glyph indices and may be non-adjacent or N-way.
 - Mixed colors are deterministic sRGB averages; custom colors remain explicit.
-- Empty-canvas click and Escape clear selection. Glyph drag selects; Space+drag pans.
+- Plain click selects one glyph; clicking a member of the current multi-selection makes it primary
+  without collapsing the group; Shift-click toggles membership. Dragging any selected glyph moves
+  the full selection. Empty-canvas click and Escape clear selection; Space+drag pans.
+- Arrow keys nudge the selected glyphs continuously while held. X/Y show the primary glyph and
+  translate the full selection by the entered delta.
+- Export options light-dismiss on outside click or Escape.
 - SVG, proportional PNG, and schema-v2 JSON export from refreshed geometry.
 - The complete workflow is keyboard operable and usable at 390 px.
 
