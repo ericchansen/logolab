@@ -718,7 +718,7 @@ body:has(.export-popover:popover-open) .export-trigger {
 
 .coordinate-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 0.7fr 34px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto 34px;
   gap: 6px;
   padding-bottom: 12px;
 }
@@ -731,6 +731,16 @@ body:has(.export-popover:popover-open) .export-trigger {
 
 .coordinate-grid input {
   min-width: 0;
+}
+
+.coordinate-grid input[type="number"] {
+  appearance: textfield;
+}
+
+.coordinate-grid input[type="number"]::-webkit-outer-spin-button,
+.coordinate-grid input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .color-field {
