@@ -1,8 +1,8 @@
 import { validateDesign } from './design'
 import type { DesignDocument, PersistedDesign, StoredFont } from './types'
 
-const DESIGN_PREFIX = 'logo-lab:design:'
-const DATABASE_NAME = 'logo-lab'
+const DESIGN_PREFIX = 'logolab:design:'
+const DATABASE_NAME = 'logolab'
 const FONT_STORE = 'fonts'
 const DATABASE_VERSION = 1
 

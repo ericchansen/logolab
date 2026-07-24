@@ -1,6 +1,6 @@
 # Bundled font notices
 
-Logo Lab includes static font binaries for logo rendering. Figtree also supplies the interface
+LogoLab includes static font binaries for logo rendering. Figtree also supplies the interface
 font:
 
 | Asset | Source | Use |
@@ -10,4 +10,4 @@ font:
 
 Both Figtree files use the copyright notice and SIL Open Font License 1.1 in
 `Figtree/OFL.txt`. Other bundled font licenses are in their adjacent directories. Font files
-are not covered by Logo Lab's MIT license.
+are not covered by LogoLab's MIT license.

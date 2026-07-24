@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { LogoStage, type GlyphSelectionAction } from './components/LogoStage'
-import { RUBIK_LOGO_LAB_PRESET } from './domain/defaultPreset'
+import { RUBIK_LOGOLAB_PRESET } from './domain/defaultPreset'
 import {
   createDesign,
   refreshMixedOverlapColors,
@@ -51,7 +51,7 @@ import type {
   StoredFont,
 } from './domain/types'
 
-const INITIAL_TEXT = 'Logo Lab'
+const INITIAL_TEXT = 'LogoLab'
 const PNG_PRESETS = [512, 1024, 2048, 4096]
 let proofRenderSequence = 0
 
@@ -138,7 +138,7 @@ function App() {
         name,
         fileName,
         source: 'local' as const,
-        previewFamily: `Logo Lab Local ${id}`,
+        previewFamily: `LogoLab Local ${id}`,
       })),
     ],
     [storedFonts],
@@ -204,7 +204,7 @@ function App() {
         source: `url("${builtInFontUrl(spec)}")`,
       })),
       ...storedFonts.map((stored) => ({
-        family: `Logo Lab Local ${stored.id}`,
+        family: `LogoLab Local ${stored.id}`,
         source: `url("${stored.dataUrl}")`,
       })),
     ]
@@ -262,7 +262,7 @@ function App() {
       const initialDesign =
         savedDesign ??
         (spec.id === DEFAULT_FONT_ID && text === INITIAL_TEXT
-          ? RUBIK_LOGO_LAB_PRESET
+          ? RUBIK_LOGOLAB_PRESET
           : createDesign(runtime, text))
       const nextDesign = resolveDesign(initialDesign, runtime)
       if (nextDesign.glyphs.length !== runtime.outlines.length) {
@@ -591,7 +591,7 @@ function App() {
         const initialDesign =
           savedDesign ??
           (activeSpec.id === DEFAULT_FONT_ID && draft === INITIAL_TEXT
-            ? RUBIK_LOGO_LAB_PRESET
+            ? RUBIK_LOGOLAB_PRESET
             : createDesign(accurateFont, draft))
         accurateDesign = resolveDesign(initialDesign, accurateFont)
       }

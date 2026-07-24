@@ -175,18 +175,18 @@ export function refreshMixedOverlapColors(design: DesignDocument): DesignDocumen
 
 export function validatePortableDesign(value: unknown): PortableDesign {
   if (!value || typeof value !== 'object') {
-    throw new Error('The imported file is not a Logo Lab design.')
+    throw new Error('The imported file is not a LogoLab design.')
   }
   const candidate = value as Partial<PortableDesign>
   if (
-    candidate.kind !== 'logo-lab-design' ||
+    candidate.kind !== 'logolab-design' ||
     (candidate.schemaVersion !== 1 && candidate.schemaVersion !== 2)
   ) {
-    throw new Error('The imported file is not a supported Logo Lab design.')
+    throw new Error('The imported file is not a supported LogoLab design.')
   }
   const design = validateDesign(candidate.design)
   if (!candidate.font) {
-    return { kind: 'logo-lab-design', schemaVersion: candidate.schemaVersion, design }
+    return { kind: 'logolab-design', schemaVersion: candidate.schemaVersion, design }
   }
   const font = candidate.font
   if (
@@ -199,7 +199,7 @@ export function validatePortableDesign(value: unknown): PortableDesign {
     throw new Error('The imported design contains invalid local font data.')
   }
   return {
-    kind: 'logo-lab-design',
+    kind: 'logolab-design',
     schemaVersion: candidate.schemaVersion,
     design,
     font: { ...font },

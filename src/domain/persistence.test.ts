@@ -101,7 +101,7 @@ describe('design persistence isolation', () => {
   })
 
   it('reports quota failures without mutating the design', () => {
-    const source = design('rubik', 'Logo Lab', 314)
+    const source = design('rubik', 'LogoLab', 314)
     const storage = new MemoryStorage()
     storage.setItem = () => {
       throw new DOMException('Storage quota exceeded.', 'QuotaExceededError')
@@ -126,12 +126,12 @@ describe('design persistence isolation', () => {
       },
     })
     try {
-      const result = trySaveDesign(design('rubik', 'Logo Lab', 314))
+      const result = trySaveDesign(design('rubik', 'LogoLab', 314))
       expect(result.ok).toBe(false)
       if (!result.ok) {
         expect(result.error.name).toBe('SecurityError')
       }
-      expect(loadDesign('rubik', 'Logo Lab')).toBeNull()
+      expect(loadDesign('rubik', 'LogoLab')).toBeNull()
     } finally {
       if (descriptor) {
         Object.defineProperty(globalThis, 'localStorage', descriptor)

@@ -1,11 +1,11 @@
-# Logo Lab
+# LogoLab
 
-[Try Logo Lab](https://ericchansen.github.io/logo-lab)
+[Try LogoLab](https://ericchansen.github.io/logolab)
 
 A client-only workbench for positioning real font outlines and coloring exact pair and N-way
 glyph intersections.
 
-![Logo Lab workbench](docs/logo-lab.png)
+![LogoLab workbench](docs/logolab.png)
 
 ## Development
 

@@ -1,4 +1,4 @@
-# Logo Lab design system
+# LogoLab design system
 
 ## Intent
 
@@ -32,7 +32,7 @@ action. Artwork colors never carry unrelated UI meaning. Essential text meets WC
 - Narrow, responsive side groups: document, font, and glyph controls on the left; selected-glyph
   properties and overlaps on the right.
 
-There is no Logo Lab title in chrome, permanent save state, command-bar band, or panel heading
+There is no LogoLab title in chrome, permanent save state, command-bar band, or panel heading
 scaffolding. Side groups size to their controls, have no borders or distinct backgrounds, and never
 stretch to viewport height. Self-evident controls use their value or object as the visible
 affordance and retain a precise accessible name instead of a permanent title.

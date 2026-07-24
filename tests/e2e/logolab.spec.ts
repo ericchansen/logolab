@@ -5,7 +5,7 @@ import path from 'node:path'
 async function waitForReady(page: Page) {
   await expect(page.getByTestId('workbench-shell')).toBeVisible()
   await expect(page.getByTestId('editor-stage')).toBeVisible()
-  await expect(page.getByLabel('Logo text', { exact: true })).toHaveValue('Logo Lab')
+  await expect(page.getByLabel('Logo text', { exact: true })).toHaveValue('LogoLab')
   await expect(page.locator('.font-picker summary')).toContainText('Rubik')
   await expect(page.getByLabel('L X position')).toHaveValue('314.93')
 }
@@ -116,7 +116,7 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(async () => {
     localStorage.clear()
     await new Promise<void>((resolve) => {
-      const request = indexedDB.deleteDatabase('logo-lab')
+      const request = indexedDB.deleteDatabase('logolab')
       request.onsuccess = () => resolve()
       request.onerror = () => resolve()
       request.onblocked = () => resolve()
@@ -171,13 +171,13 @@ test('self-hosts the normalized Figtree UI without changing font previews', asyn
     externalResources: [],
   })
   expect(typography.uiFamily).toContain('Figtree UI')
-  expect(typography.previewFamily).toContain('Logo Lab Archivo')
+  expect(typography.previewFamily).toContain('LogoLab Archivo')
   expect(typography.fontResources).toHaveLength(1)
   expect(typography.fontResources[0]).toMatch(/Figtree-Variable[^/]*\.woff2/)
   await expect(page.locator('.ui-type-preview')).toHaveCount(0)
 })
 
-test('opens directly on the captured Rubik Logo Lab preset at desktop and narrow widths', async ({ page }) => {
+test('opens directly on the captured Rubik LogoLab preset at desktop and narrow widths', async ({ page }) => {
   const expectDesktopTopology = async (width: number, height: number) => {
     await page.setViewportSize({ width, height })
     const geometry = await page.evaluate(() => {
@@ -420,7 +420,7 @@ test('uses direct, accessible controls without redundant chrome', async ({ page 
     second: await secondGlyph.getAttribute('transform'),
   }
   await linkedMove.click()
-  await expect(page.locator('.glyph-tabs [role="option"][aria-selected="true"]')).toHaveCount(8)
+  await expect(page.locator('.glyph-tabs [role="option"][aria-selected="true"]')).toHaveCount(7)
   await stage.focus()
   await page.keyboard.press('ArrowRight')
   const linked = {
@@ -533,12 +533,14 @@ test('keeps selection and layer focus valid after importing a shorter design', a
   const download = await downloadPromise
   const filePath = await download.path()
   expect(filePath).not.toBeNull()
+  expect(download.suggestedFilename()).toBe('A.logolab.json')
   const importedDesign = await readFile(filePath ?? '')
+  expect(JSON.parse(importedDesign.toString())).toMatchObject({ kind: 'logolab-design' })
 
   await setText(page, 'ABC')
   await selectGlyph(page, 2)
   await page.getByLabel('Import JSON').setInputFiles({
-    name: 'shorter.logo-lab.json',
+    name: 'shorter.logolab.json',
     mimeType: 'application/json',
     buffer: importedDesign,
   })
@@ -924,7 +926,7 @@ test('renders every bundled font and isolates autosave by font and text', async 
   await setSelectedX(page, 123)
   for (const family of families) {
     await selectFont(page, family)
-    await expect(page.getByTestId('editor-stage').locator('[data-glyph]')).toHaveCount(8)
+    await expect(page.getByTestId('editor-stage').locator('[data-glyph]')).toHaveCount(7)
   }
 
   await selectFont(page, 'Figtree')
@@ -933,7 +935,7 @@ test('renders every bundled font and isolates autosave by font and text', async 
   await expect(page.getByLabel('L X position')).toHaveValue('123')
   await setText(page, 'Lab')
   await setSelectedX(page, 789)
-  await setText(page, 'Logo Lab')
+  await setText(page, 'LogoLab')
   await expect(page.getByLabel('L X position')).toHaveValue('123')
   await selectFont(page, 'Figtree')
   await expect(page.getByLabel('L X position')).toHaveValue('456')
@@ -1007,7 +1009,7 @@ test('blocks export while an explicit font switch is loading', async ({ page }) 
   expect(downloads).toBe(0)
   releaseFontRequest?.()
   await expect(picker.locator('summary')).toContainText('Figtree')
-  await expect(page.locator('.glyph-tabs button')).toHaveCount(8)
+  await expect(page.locator('.glyph-tabs button')).toHaveCount(7)
 })
 
 test('cancels export without overwriting edits made while its font loads', async ({ page }) => {
@@ -1072,7 +1074,7 @@ test('keeps in-memory work and contains localStorage quota failures', async ({ p
   )
   await expect(page.getByLabel('Text')).toHaveValue('Quota')
   await expect(picker.locator('summary')).toContainText('Rubik')
-  await expect(page.locator('.glyph-tabs button')).toHaveCount(8)
+  await expect(page.locator('.glyph-tabs button')).toHaveCount(7)
   expect(pageErrors).toEqual([])
 })
 
@@ -1091,7 +1093,7 @@ test('keeps the workbench usable when browser storage access is blocked', async 
   await expect(page.getByRole('alert')).toContainText(
     'Could not save locally. Free browser storage or export JSON, then try again.',
   )
-  await expect(page.getByLabel('Text')).toHaveValue('Logo Lab')
+  await expect(page.getByLabel('Text')).toHaveValue('LogoLab')
 })
 
 test('letter drag, empty click, Escape, and Space-pan remain distinct', async ({ page }) => {
@@ -1252,7 +1254,7 @@ test('adds and confirms removal of a local font and its saved variants', async (
   await setSelectedX(page, 321)
   await setText(page, 'Local')
   await setSelectedX(page, 654)
-  await setText(page, 'Logo Lab')
+  await setText(page, 'LogoLab')
 
   await page.locator('.font-picker summary').click()
   const localRemove = page.getByRole('button', { name: /Remove Figtree/ })
@@ -1261,7 +1263,7 @@ test('adds and confirms removal of a local font and its saved variants', async (
   await expect(page.locator('.font-picker summary')).toContainText('Rubik')
   await page.waitForTimeout(400)
   const localKeys = await page.evaluate(() =>
-    Object.keys(localStorage).filter((key) => key.startsWith('logo-lab:design:local-')),
+    Object.keys(localStorage).filter((key) => key.startsWith('logolab:design:local-')),
   )
   expect(localKeys).toEqual([])
 })
@@ -1269,7 +1271,7 @@ test('adds and confirms removal of a local font and its saved variants', async (
 test('keeps selection and layer focus valid when a font upload uses shorter pending text', async ({
   page,
 }) => {
-  await selectGlyph(page, 7)
+  await selectGlyph(page, 6)
   await page.getByLabel('Logo text', { exact: true }).fill('A')
   await page
     .locator('input[type="file"][accept*=".ttf"]')
@@ -1305,7 +1307,7 @@ test('keeps active work accessible without recreating variants if removal fallba
   await setSelectedX(page, 713)
   await page.waitForTimeout(400)
   const localKeys = await page.evaluate(() =>
-    Object.keys(localStorage).filter((key) => key.startsWith('logo-lab:design:local-')),
+    Object.keys(localStorage).filter((key) => key.startsWith('logolab:design:local-')),
   )
   expect(localKeys).toEqual([])
 })
