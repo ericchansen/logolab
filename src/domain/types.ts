@@ -82,7 +82,7 @@ export interface LegacyDesignDocument {
 export type PersistedDesign = DesignDocument | LegacyDesignDocument
 
 export interface PortableDesign {
-  kind: 'logo-lab-design'
+  kind: 'logolab-design'
   schemaVersion: 1 | 2
   design: PersistedDesign
   font?: {

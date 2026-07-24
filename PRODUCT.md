@@ -1,8 +1,8 @@
-# Logo Lab
+# LogoLab
 
 ## Product
 
-Logo Lab is a client-only creative tool for turning real font outlines into distinctive,
+LogoLab is a client-only creative tool for turning real font outlines into distinctive,
 export-ready marks. It serves design-savvy builders working at a laptop and keeps minute
 positioning changes calm, exact, and immediate.
 
@@ -13,7 +13,7 @@ their branding. The interface disappears into the work; the artwork carries the 
 
 ## Principles
 
-1. Canvas before chrome. Open directly on the fitted Rubik `Logo Lab` composition.
+1. Canvas before chrome. Open directly on the fitted Rubik `LogoLab` composition.
    Compact, content-driven controls flank the dominant canvas without becoming full-height rails.
 2. Trust the geometry. Preserve native curves, discover exact occupancy sets, and use one
    pair-relative renderer for editor proofs and exports.

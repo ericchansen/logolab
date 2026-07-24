@@ -334,7 +334,7 @@ describe('design serialization', () => {
     expect(validateDesign({ ...document(), smallProofPx: 256 }).smallProofPx).toBe(64)
   })
 
-  it('validates portable local font data', () => {
+  it('accepts only the LogoLab portable design discriminator', () => {
     const font: StoredFont = {
       id: 'local-123',
       name: 'Local Font',
@@ -342,11 +342,18 @@ describe('design serialization', () => {
       dataUrl: 'data:font/ttf;base64,AA==',
     }
     expect(validatePortableDesign({
-      kind: 'logo-lab-design',
+      kind: 'logolab-design',
       schemaVersion: 2,
       design: document(),
       font,
     }).font).toEqual(font)
+    expect(() =>
+      validatePortableDesign({
+        kind: 'logo-lab-design',
+        schemaVersion: 2,
+        design: document(),
+      }),
+    ).toThrow(/not a supported LogoLab design/)
   })
 
   it('creates deterministic explicit overlap records', () => {

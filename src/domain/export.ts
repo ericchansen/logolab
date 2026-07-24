@@ -81,7 +81,7 @@ export function downloadDesign(
   storedFont?: StoredFont,
 ): void {
   const payload: PortableDesign = {
-    kind: 'logo-lab-design',
+    kind: 'logolab-design',
     schemaVersion: 2,
     design,
     ...(storedFont ? { font: storedFont } : {}),
@@ -90,6 +90,6 @@ export function downloadDesign(
     new Blob([JSON.stringify(payload, null, 2)], {
       type: 'application/json',
     }),
-    `${safeFileName(design.text)}.logo-lab.json`,
+    `${safeFileName(design.text)}.logolab.json`,
   )
 }
