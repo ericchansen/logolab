@@ -462,6 +462,13 @@ function App() {
     })
   }
 
+  function activateGlyphSelection(index: number, toggle: boolean) {
+    updateGlyphSelection(
+      index,
+      toggle ? 'toggle' : selection.indices.includes(index) ? 'primary' : 'replace',
+    )
+  }
+
   function handleLayerKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const lastIndex = Array.from(design?.text ?? '').length - 1
     let nextIndex: number | null = null
@@ -475,7 +482,7 @@ function App() {
       nextIndex = lastIndex
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
-      updateGlyphSelection(index, event.shiftKey ? 'toggle' : 'replace')
+      activateGlyphSelection(index, event.shiftKey)
       return
     }
     if (nextIndex !== null) {
@@ -996,9 +1003,7 @@ function App() {
                 tabIndex={layerFocusIndex === index ? 0 : -1}
                 onFocus={() => setLayerFocusIndex(index)}
                 onKeyDown={(event) => handleLayerKeyDown(event, index)}
-                onClick={(event) =>
-                  updateGlyphSelection(index, event.shiftKey ? 'toggle' : 'replace')
-                }
+                onClick={(event) => activateGlyphSelection(index, event.shiftKey)}
               >
                 <span>{String(index + 1).padStart(2, '0')}</span>
                 <strong>{glyphLabel(character)}</strong>
