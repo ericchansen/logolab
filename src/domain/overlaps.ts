@@ -320,7 +320,6 @@ export function migrateLegacyDesign(
     fontName: legacy.fontName,
     text: legacy.text,
     glyphs: legacy.glyphs,
-    letterSpacing: 0,
     overlaps: [],
     overlapsStale: true,
     lightBackground: legacy.lightBackground,
