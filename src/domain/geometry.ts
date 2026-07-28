@@ -143,11 +143,35 @@ export function moveGlyphs(
   }
 }
 
-export function setUniformLetterSpacing(
+export function averageGlyphGap(
   design: DesignDocument,
-  letterSpacing: number,
+  font: FontRuntime,
+): number {
+  if (design.glyphs.length < 2) {
+    return 0
+  }
+  let total = 0
+  for (let index = 0; index < design.glyphs.length - 1; index += 1) {
+    const left = design.glyphs[index]
+    const right = design.glyphs[index + 1]
+    const leftOutline = font.outlines[index]
+    const rightOutline = font.outlines[index + 1]
+    if (!left || !right || !leftOutline || !rightOutline) {
+      throw new Error(`Missing geometry for glyph pair ${index}.`)
+    }
+    const leftEdge = left.x + leftOutline.bounds.x2
+    const rightEdge = right.x + rightOutline.bounds.x1
+    total += rightEdge - leftEdge
+  }
+  return total / (design.glyphs.length - 1)
+}
+
+export function setAverageGlyphGap(
+  design: DesignDocument,
+  font: FontRuntime,
+  targetGap: number,
 ): DesignDocument {
-  const delta = letterSpacing - design.letterSpacing
+  const delta = targetGap - averageGlyphGap(design, font)
   if (delta === 0) {
     return design
   }
@@ -157,7 +181,6 @@ export function setUniformLetterSpacing(
       ...glyph,
       x: glyph.x + index * delta,
     })),
-    letterSpacing,
     overlapsStale: true,
     updatedAt: new Date().toISOString(),
   }

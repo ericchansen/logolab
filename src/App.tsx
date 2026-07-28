@@ -26,12 +26,13 @@ import {
   normalizeStoredFont,
 } from './domain/fonts'
 import {
+  averageGlyphGap,
   expandRect,
   getDesignBounds,
   getPaintedBounds,
   moveGlyphs,
   normalizeDesignCoordinates,
-  setUniformLetterSpacing,
+  setAverageGlyphGap,
 } from './domain/geometry'
 import { recalculateOverlaps } from './domain/overlaps'
 import {
@@ -898,6 +899,7 @@ function App() {
   const pngPreset = PNG_PRESETS.includes(design.pngLongestSide)
     ? String(design.pngLongestSide)
     : 'custom'
+  const averageGap = averageGlyphGap(design, font)
 
   return (
     <div className="app-shell">
@@ -1229,17 +1231,18 @@ function App() {
 
           <div className="spacing-control">
             <label>
-              Spacing
+              Avg gap
               <input
-                aria-label="Uniform letter spacing"
-                title="Adjust every gap by the same amount"
+                aria-label="Average glyph gap"
+                title="Average edge-to-edge gap; negative values overlap"
                 type="number"
                 step="1"
-                value={Math.round(design.letterSpacing * 100) / 100}
+                value={Math.round(averageGap * 100) / 100}
+                disabled={design.glyphs.length < 2}
                 onChange={(event) => {
-                  const spacing = Number(event.target.value)
-                  if (Number.isFinite(spacing)) {
-                    updateDesign((current) => setUniformLetterSpacing(current, spacing))
+                  const gap = Number(event.target.value)
+                  if (Number.isFinite(gap)) {
+                    updateDesign((current) => setAverageGlyphGap(current, font, gap))
                   }
                 }}
               />

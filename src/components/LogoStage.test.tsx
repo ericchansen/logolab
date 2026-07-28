@@ -10,7 +10,6 @@ const design: DesignDocument = {
   fontName: 'Test Font',
   text: 'A',
   glyphs: [{ x: 0, y: 0, color: '#112233' }],
-  letterSpacing: 0,
   overlaps: [],
   overlapsStale: false,
   lightBackground: '#FFFFFF',

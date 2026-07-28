@@ -42,7 +42,6 @@ function fixture(positions: number[]): { design: DesignDocument; font: FontRunti
         y: 0,
         color: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00'][index] ?? '#000000',
       })),
-      letterSpacing: 0,
       overlaps: [],
       overlapsStale: true,
       lightBackground: '#FFFFFF',
