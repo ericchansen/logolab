@@ -24,6 +24,7 @@ export function createDesign(font: FontRuntime, text: string): DesignDocument {
     fontName: font.name,
     text,
     glyphs,
+    letterSpacing: 0,
     overlaps: [],
     overlapsStale: true,
     lightBackground: '#F7F9FC',
@@ -116,6 +117,9 @@ export function validateDesign(value: unknown): PersistedDesign {
   if (candidate.schemaVersion !== 2 || !Array.isArray(candidate.overlaps)) {
     throw new Error('The design JSON has an unsupported or incomplete shape.')
   }
+  if (candidate.letterSpacing !== undefined && !isFiniteNumber(candidate.letterSpacing)) {
+    throw new Error('The design contains invalid letter spacing.')
+  }
   const overlaps = candidate.overlaps.map((record) => {
     if (
       !record ||
@@ -143,6 +147,7 @@ export function validateDesign(value: unknown): PersistedDesign {
     ...common,
     text,
     glyphs,
+    letterSpacing: isFiniteNumber(candidate.letterSpacing) ? candidate.letterSpacing : 0,
     overlaps,
     overlapsStale: Boolean(candidate.overlapsStale),
     pngLongestSide: isFiniteNumber(candidate.pngLongestSide)

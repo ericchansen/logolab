@@ -31,6 +31,7 @@ import {
   getPaintedBounds,
   moveGlyphs,
   normalizeDesignCoordinates,
+  setUniformLetterSpacing,
 } from './domain/geometry'
 import { recalculateOverlaps } from './domain/overlaps'
 import {
@@ -1224,6 +1225,25 @@ function App() {
             {design.overlapsStale
               ? <span role="status">Stale</span>
               : geometryFeedback && <span role="status">{geometryFeedback}</span>}
+          </div>
+
+          <div className="spacing-control">
+            <label>
+              Spacing
+              <input
+                aria-label="Uniform letter spacing"
+                title="Adjust every gap by the same amount"
+                type="number"
+                step="1"
+                value={Math.round(design.letterSpacing * 100) / 100}
+                onChange={(event) => {
+                  const spacing = Number(event.target.value)
+                  if (Number.isFinite(spacing)) {
+                    updateDesign((current) => setUniformLetterSpacing(current, spacing))
+                  }
+                }}
+              />
+            </label>
           </div>
 
           {selected && (

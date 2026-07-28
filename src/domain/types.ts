@@ -57,6 +57,7 @@ export interface DesignDocument {
   fontName: string
   text: string
   glyphs: GlyphStyle[]
+  letterSpacing: number
   overlaps: OverlapRecord[]
   overlapsStale: boolean
   lightBackground: string
