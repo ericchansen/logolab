@@ -410,6 +410,19 @@ body:has(.export-popover:popover-open) .export-trigger {
   font: 600 0.64rem "Segoe UI Variable", "Segoe UI", sans-serif;
 }
 
+.font-options .installed-font-trigger {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.installed-font-filter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 4px;
+  background: var(--surface-strong);
+}
+
 .local-font-option {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px;

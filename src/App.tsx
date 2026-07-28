@@ -21,9 +21,13 @@ import {
   DEFAULT_FONT_ID,
   builtInFontUrl,
   createStoredFont,
+  installedFontFile,
+  listInstalledFonts,
   loadBuiltInFont,
   loadStoredFont,
   normalizeStoredFont,
+  supportsInstalledFonts,
+  type InstalledFont,
 } from './domain/fonts'
 import {
   averageGlyphGap,
@@ -101,6 +105,8 @@ function glyphLabel(character: string): string {
 
 function App() {
   const [storedFonts, setStoredFonts] = useState<StoredFont[]>([])
+  const [installedFonts, setInstalledFonts] = useState<InstalledFont[] | null>(null)
+  const [installedFilter, setInstalledFilter] = useState('')
   const [font, setFont] = useState<FontRuntime | null>(null)
   const [design, setDesign] = useState<DesignDocument | null>(null)
   const [textDraft, setTextDraft] = useState(INITIAL_TEXT)
@@ -145,6 +151,19 @@ function App() {
     ],
     [storedFonts],
   )
+
+  const visibleInstalledFonts = useMemo(() => {
+    if (!installedFonts) {
+      return []
+    }
+    const needle = installedFilter.trim().toLowerCase()
+    const matches = needle
+      ? installedFonts.filter((candidate) =>
+          candidate.fullName.toLowerCase().includes(needle),
+        )
+      : installedFonts
+    return matches.slice(0, 60)
+  }, [installedFonts, installedFilter])
 
   function persistDesign(nextDesign: DesignDocument): boolean {
     if (deletedFontIds.current.has(nextDesign.fontId)) {
@@ -708,6 +727,39 @@ function App() {
       setError('Choose a TTF or OTF font file.')
       return
     }
+    await ingestFont(file)
+  }
+
+  async function revealInstalledFonts() {
+    setError('')
+    try {
+      const installed = await listInstalledFonts()
+      if (installed.length === 0) {
+        setError(
+          'This site is blocked from reading your installed fonts. Allow font access in your browser site permissions, then try again.',
+        )
+        return
+      }
+      setInstalledFonts(installed)
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Fonts installed on this machine could not be read.',
+      )
+    }
+  }
+
+  async function useInstalledFont(postscriptName: string) {
+    setError('')
+    try {
+      await ingestFont(await installedFontFile(postscriptName))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The font could not be read.')
+    }
+  }
+
+  async function ingestFont(file: File) {
     if (file.size > 10 * 1024 * 1024) {
       setError('Local font files must be 10 MB or smaller.')
       return
@@ -969,6 +1021,40 @@ function App() {
                   </div>
                 )
               })}
+              {supportsInstalledFonts() && (
+                installedFonts === null ? (
+                  <button
+                    className="installed-font-trigger"
+                    disabled={isBusy}
+                    onClick={() => void revealInstalledFonts()}
+                  >
+                    Installed on this machine
+                  </button>
+                ) : (
+                  <>
+                    <span className="font-group-label">Installed</span>
+                    <input
+                      className="installed-font-filter"
+                      aria-label="Filter installed fonts"
+                      placeholder="Segoe UI"
+                      value={installedFilter}
+                      spellCheck={false}
+                      onChange={(event) => setInstalledFilter(event.target.value)}
+                    />
+                    {visibleInstalledFonts.map((installed) => (
+                      <button
+                        key={installed.postscriptName}
+                        role="option"
+                        aria-selected={false}
+                        disabled={isBusy}
+                        onClick={() => void useInstalledFont(installed.postscriptName)}
+                      >
+                        {installed.fullName}
+                      </button>
+                    ))}
+                  </>
+                )
+              )}
             </div>
           </details>
 

@@ -36,6 +36,12 @@ translate(member.x - anchor.x, member.y - anchor.y)
 Fresh IDs avoid Edge clip cache reuse. Export recalculates stale overlap data before writing.
 Designs autosave per font and text in localStorage; local fonts use IndexedDB.
 
+The typeface picker also reads fonts installed on your machine through the Local Font Access
+API, so proprietary faces you are already licensed for can be used without being redistributed
+here. Chromium browsers only, and the site needs font access permission. A font you pick is
+copied into IndexedDB alongside uploaded fonts, so exported JSON embeds it -- check the font
+license before sharing that file.
+
 ## Font licenses
 
 The bundled static or deterministically instantiated font files remain under SIL Open Font

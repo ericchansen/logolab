@@ -109,6 +109,52 @@ export const BUILT_IN_FONTS: FontSpec[] = [
 
 export const DEFAULT_FONT_ID = 'rubik-extrabold'
 
+export interface InstalledFont {
+  postscriptName: string
+  fullName: string
+  family: string
+}
+
+interface FontData extends InstalledFont {
+  blob(): Promise<Blob>
+}
+
+declare global {
+  interface Window {
+    queryLocalFonts?: () => Promise<FontData[]>
+  }
+}
+
+export function supportsInstalledFonts(): boolean {
+  return typeof window !== 'undefined' && typeof window.queryLocalFonts === 'function'
+}
+
+export async function listInstalledFonts(): Promise<InstalledFont[]> {
+  if (!supportsInstalledFonts()) {
+    throw new Error('This browser cannot read fonts installed on your machine.')
+  }
+  const fonts = await window.queryLocalFonts!()
+  return fonts
+    .map(({ postscriptName, fullName, family }) => ({ postscriptName, fullName, family }))
+    .sort((left, right) => left.fullName.localeCompare(right.fullName))
+}
+
+export async function installedFontFile(postscriptName: string): Promise<File> {
+  if (!supportsInstalledFonts()) {
+    throw new Error('This browser cannot read fonts installed on your machine.')
+  }
+  const fonts = await window.queryLocalFonts!()
+  if (fonts.length === 0) {
+    throw new Error('This site is no longer allowed to read your installed fonts.')
+  }
+  const match = fonts.find((candidate) => candidate.postscriptName === postscriptName)
+  if (!match) {
+    throw new Error(`${postscriptName} is no longer installed on this machine.`)
+  }
+  const blob = await match.blob()
+  return new File([blob], `${postscriptName}.ttf`, { type: blob.type || 'font/ttf' })
+}
+
 export function builtInFontUrl(spec: FontSpec): string {
   if (!spec.url) {
     throw new Error(`Built-in font ${spec.name} has no URL.`)
