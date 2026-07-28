@@ -143,6 +143,26 @@ export function moveGlyphs(
   }
 }
 
+export function setUniformLetterSpacing(
+  design: DesignDocument,
+  letterSpacing: number,
+): DesignDocument {
+  const delta = letterSpacing - design.letterSpacing
+  if (delta === 0) {
+    return design
+  }
+  return {
+    ...design,
+    glyphs: design.glyphs.map((glyph, index) => ({
+      ...glyph,
+      x: glyph.x + index * delta,
+    })),
+    letterSpacing,
+    overlapsStale: true,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
 export function horizontalOverlap(
   design: DesignDocument,
   font: FontRuntime,

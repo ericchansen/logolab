@@ -47,6 +47,7 @@ function design(fontId: string, text: string, x: number): DesignDocument {
       y: 0,
       color: '#112233',
     })),
+    letterSpacing: 0,
     overlaps: [],
     overlapsStale: false,
     lightBackground: '#FFFFFF',

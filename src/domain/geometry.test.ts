@@ -7,6 +7,7 @@ import {
   normalizeDesignCoordinates,
   pairRelativeOffset,
   pairRelativeTransform,
+  setUniformLetterSpacing,
 } from './geometry'
 import { recalculateOverlaps } from './overlaps'
 import { buildSvgMarkup } from './svg'
@@ -55,6 +56,7 @@ function document(): DesignDocument {
       { x: 125, y: 40, color: '#112233' },
       { x: 475, y: -35, color: '#445566' },
     ],
+    letterSpacing: 0,
     overlaps: [{
       glyphIndices: [0, 1],
       color: '#ABCDEF',
@@ -282,6 +284,28 @@ describe('pair-relative clipping geometry', () => {
     expect(afterSvg).toContain('transform="translate(325 45)"')
     expect(afterSvg).toContain('transform="translate(-2775 985)"')
     expect(afterSvg).toContain('transform="translate(0 0)"')
+  })
+})
+
+describe('uniform letter spacing', () => {
+  it('applies only the spacing delta while preserving the first glyph and custom offsets', () => {
+    const source = {
+      ...document(),
+      text: 'ABC',
+      glyphs: [
+        ...document().glyphs,
+        { x: 900, y: 25, color: '#778899' },
+      ],
+    }
+
+    const widened = setUniformLetterSpacing(source, 20)
+    const narrowed = setUniformLetterSpacing(widened, 5)
+
+    expect(widened.glyphs.map(({ x }) => x)).toEqual([125, 495, 940])
+    expect(narrowed.glyphs.map(({ x }) => x)).toEqual([125, 480, 910])
+    expect(narrowed.glyphs.map(({ y }) => y)).toEqual([40, -35, 25])
+    expect(narrowed.letterSpacing).toBe(5)
+    expect(narrowed.overlapsStale).toBe(true)
   })
 })
 
