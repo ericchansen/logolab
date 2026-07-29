@@ -23,6 +23,7 @@
   --accent-soft: oklch(0.93 0.04 260);
   --danger: oklch(0.52 0.19 25);
   --control: oklch(0.995 0.002 255);
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.165, 0.84, 0.44, 1);
 }
 
@@ -613,6 +614,19 @@ body:has(.export-popover:popover-open) .export-trigger {
   cursor: pointer;
 }
 
+input[type="text"].hex-text.proof-background-hex {
+  position: absolute;
+  left: 7px;
+  bottom: 6px;
+  color: var(--proof-ink);
+}
+
+input[type="text"].hex-text.proof-background-hex:hover,
+input[type="text"].hex-text.proof-background-hex:focus-visible {
+  border-color: color-mix(in oklab, var(--proof-ink) 35%, transparent);
+  background: color-mix(in oklab, var(--proof-ink) 8%, transparent);
+}
+
 .proof-small {
   display: grid;
   grid-column: 1 / -1;
@@ -718,7 +732,7 @@ body:has(.export-popover:popover-open) .export-trigger {
 
 .coordinate-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 0.7fr 34px;
+  grid-template-columns: 1fr 1fr 34px;
   gap: 6px;
   padding-bottom: 12px;
 }
@@ -734,7 +748,31 @@ body:has(.export-popover:popover-open) .export-trigger {
 }
 
 .color-field {
+  grid-column: 1 / -1;
   justify-items: start;
+}
+
+.hex-color {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+input[type="text"].hex-text {
+  width: calc(7ch + 6px);
+  min-height: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  padding: 2px 2px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="text"].hex-text:hover {
+  border-color: var(--line);
 }
 
 .following-toggle {
@@ -806,6 +844,14 @@ body:has(.export-popover:popover-open) .export-trigger {
   font-size: 0.6875rem;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
+}
+
+.pair-meta {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  margin-left: -2px;
 }
 
 .mix-button {

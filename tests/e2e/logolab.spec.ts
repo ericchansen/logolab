@@ -1321,3 +1321,67 @@ test('supports PNG presets and a custom validated longest side', async ({ page }
   await page.getByLabel('Custom PNG longest side').fill('1536')
   await expect(page.getByLabel('Custom PNG longest side')).toHaveValue('1536')
 })
+
+test('accepts pasted hex codes everywhere a color can be set', async ({ page }) => {
+  await selectGlyph(page, 0)
+  const baseHex = page.getByLabel('L base color hex')
+  await expect(baseHex).toHaveValue('#1b6ef3')
+
+  await baseHex.fill('E3008C')
+  await expect(page.getByLabel('L base color', { exact: true })).toHaveValue('#e3008c')
+  await expect(page.getByTestId('editor-stage').locator('[data-glyph="0"]')).toHaveAttribute(
+    'fill',
+    '#e3008c',
+  )
+
+  await baseHex.fill('not a color')
+  await baseHex.blur()
+  await expect(baseHex).toHaveValue('#e3008c')
+  await expect(page.getByLabel('L base color', { exact: true })).toHaveValue('#e3008c')
+
+  await baseHex.fill('#0f0')
+  await expect(page.getByLabel('L base color', { exact: true })).toHaveValue('#00ff00')
+
+  await page.waitForTimeout(400)
+  const stored = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((candidate) =>
+      candidate.startsWith('logolab:design:'),
+    )
+    return key ? (JSON.parse(localStorage.getItem(key) ?? '{}') as { glyphs?: { color: string }[] }) : null
+  })
+  expect(stored?.glyphs?.[0]?.color).toBe('#00ff00')
+
+  const lightHex = page.getByLabel('Light proof background hex')
+  await expect(lightHex).toHaveValue('#f7f9fc')
+  await lightHex.fill('#eee')
+  await expect(page.locator('.proof-light')).toHaveCSS('background-color', 'rgb(238, 238, 238)')
+
+  const darkHex = page.getByLabel('Dark proof background hex')
+  await darkHex.fill('1a1a1a')
+  await expect(page.locator('.proof-dark')).toHaveCSS('background-color', 'rgb(26, 26, 26)')
+})
+
+test('typing an overlap hex switches that overlap off mixed mode', async ({ page }) => {
+  await setText(page, 'MM')
+  await selectGlyph(page, 0)
+  await setSelectedX(page, 0)
+  await selectGlyph(page, 1)
+  await setSelectedX(page, 260)
+  await page.getByRole('button', { name: 'Recalculate' }).click()
+
+  const row = page.locator('.pair-row').first()
+  const mix = row.getByRole('button', { name: 'Mix' })
+  await mix.click()
+  await expect(mix).toHaveAttribute('aria-pressed', 'true')
+
+  const overlapHex = row.locator('input.hex-text')
+  await overlapHex.fill('#e3008c')
+
+  await expect(mix).toHaveAttribute('aria-pressed', 'false')
+  await expect(row.locator('input[type="color"]')).toHaveValue('#e3008c')
+
+  await page.getByRole('button', { name: 'Recalculate' }).click()
+  await expect(page.locator('.pair-row').first().locator('input[type="color"]')).toHaveValue(
+    '#e3008c',
+  )
+})

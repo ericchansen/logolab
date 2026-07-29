@@ -7,7 +7,9 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react'
+import { HexColorInput, HexTextInput } from './components/HexColorInput'
 import { LogoStage, type GlyphSelectionAction } from './components/LogoStage'
+import { readableInkColor } from './domain/colors'
 import { RUBIK_LOGOLAB_PRESET } from './domain/defaultPreset'
 import {
   createDesign,
@@ -513,6 +515,19 @@ function App() {
         : { x: 0, y: value - glyph.y }
       return moveGlyphs(current, selection.indices, delta)
     })
+  }
+
+  function applyOverlapColor(index: number, color: string) {
+    updateDesign((current) =>
+      withUpdatedTime({
+        ...current,
+        overlaps: current.overlaps.map((candidate, overlapIndex) =>
+          overlapIndex === index
+            ? { ...candidate, color, colorMode: 'custom' }
+            : candidate,
+        ),
+      }),
+    )
   }
 
   function recalculate() {
@@ -1123,9 +1138,12 @@ function App() {
           </div>
 
           <div className="proof-grid" aria-label="Proofs">
-            <label
+            <div
               className="proof proof-large proof-interactive proof-light"
-              style={{ background: design.lightBackground }}
+              style={{
+                background: design.lightBackground,
+                '--proof-ink': readableInkColor(design.lightBackground),
+              } as CSSProperties}
             >
               <span
                 className="proof-artwork"
@@ -1143,10 +1161,21 @@ function App() {
                   )
                 }
               />
-            </label>
-            <label
+              <HexTextInput
+                className="proof-background-hex"
+                value={design.lightBackground}
+                label="Light proof background hex"
+                onChange={(lightBackground) =>
+                  updateDesign((current) => withUpdatedTime({ ...current, lightBackground }))
+                }
+              />
+            </div>
+            <div
               className="proof proof-large proof-interactive proof-dark"
-              style={{ background: design.darkBackground }}
+              style={{
+                background: design.darkBackground,
+                '--proof-ink': readableInkColor(design.darkBackground),
+              } as CSSProperties}
             >
               <span
                 className="proof-artwork"
@@ -1164,7 +1193,15 @@ function App() {
                   )
                 }
               />
-            </label>
+              <HexTextInput
+                className="proof-background-hex"
+                value={design.darkBackground}
+                label="Dark proof background hex"
+                onChange={(darkBackground) =>
+                  updateDesign((current) => withUpdatedTime({ ...current, darkBackground }))
+                }
+              />
+            </div>
             <div
               className="proof-small"
               style={{
@@ -1258,25 +1295,6 @@ function App() {
                   }}
                 />
               </label>
-              <label className="color-field">
-                Base
-                <input
-                  aria-label={`${glyphLabel(selectedCharacter)} base color`}
-                  type="color"
-                  value={selected.color}
-                  onChange={(event) => {
-                    const color = event.target.value
-                    updateDesign((current) =>
-                      refreshMixedOverlapColors(withUpdatedTime({
-                        ...current,
-                        glyphs: current.glyphs.map((glyph, index) =>
-                          index === selection.primary ? { ...glyph, color } : glyph,
-                        ),
-                      })),
-                    )
-                  }}
-                />
-              </label>
               <button
                 className="following-toggle"
                 aria-label={`Select ${glyphLabel(selectedCharacter)} and following glyphs`}
@@ -1296,6 +1314,24 @@ function App() {
                   <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                 </svg>
               </button>
+              <label className="color-field">
+                Base
+                <HexColorInput
+                  value={selected.color}
+                  swatchLabel={`${glyphLabel(selectedCharacter)} base color`}
+                  hexLabel={`${glyphLabel(selectedCharacter)} base color hex`}
+                  onChange={(color) => {
+                    updateDesign((current) =>
+                      refreshMixedOverlapColors(withUpdatedTime({
+                        ...current,
+                        glyphs: current.glyphs.map((glyph, index) =>
+                          index === selection.primary ? { ...glyph, color } : glyph,
+                        ),
+                      })),
+                    )
+                  }}
+                />
+              </label>
             </div>
           )}
 
@@ -1315,27 +1351,22 @@ function App() {
                 >
                   <div>
                     <strong>{labels.join('–')}</strong>
-                    <span>
-                      {overlap.coverage < 0.1 ? '<0.1' : overlap.coverage.toFixed(1)}%
+                    <span className="pair-meta">
+                      <HexTextInput
+                        value={overlap.color}
+                        label={`${labels.join(' ')} overlap color hex`}
+                        onChange={(color) => applyOverlapColor(index, color)}
+                      />
+                      <span>
+                        {overlap.coverage < 0.1 ? '<0.1' : overlap.coverage.toFixed(1)}%
+                      </span>
                     </span>
                   </div>
                   <input
                     aria-label={`${labels.join(' ')} overlap color`}
                     type="color"
                     value={overlap.color}
-                    onChange={(event) => {
-                      const color = event.target.value
-                      updateDesign((current) =>
-                        withUpdatedTime({
-                          ...current,
-                          overlaps: current.overlaps.map((candidate, overlapIndex) =>
-                            overlapIndex === index
-                              ? { ...candidate, color, colorMode: 'custom' }
-                              : candidate,
-                          ),
-                        }),
-                      )
-                    }}
+                    onChange={(event) => applyOverlapColor(index, event.target.value)}
                   />
                   <button
                     className="mix-button"
